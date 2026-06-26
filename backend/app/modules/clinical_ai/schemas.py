@@ -15,3 +15,4 @@ class AIClinicalOutput(BaseModel):
     diagnosticos_sugeridos: List[Dict]
     receta_borrador: List[str]
     resumen_paciente: str
+    alertas: List[str] = []
