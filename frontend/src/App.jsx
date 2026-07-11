@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import './App.css'
 import MainLayout from './components/MainLayout'
 import ClinicalWorkspace from './pages/ClinicalWorkspace'
+import PatientsPage from './pages/PatientsPage'
 import PlaceholderPage from './pages/PlaceholderPage'
 
 function App() {
@@ -18,15 +19,7 @@ function App() {
             />
           }
         />
-        <Route
-          path="pacientes"
-          element={
-            <PlaceholderPage
-              title="Pacientes"
-              description="Directorio y fichas de pacientes."
-            />
-          }
-        />
+        <Route path="pacientes" element={<PatientsPage />} />
         <Route
           path="consultas"
           element={

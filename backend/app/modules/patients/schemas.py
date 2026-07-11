@@ -40,3 +40,22 @@ class MedicationResponse(MedicationCreate):
 
     class Config:
         from_attributes = True
+
+# --- ESQUEMA DE PERFIL CLÍNICO (para el frontend) ---
+class ClinicalProfileAllergy(BaseModel):
+    allergen: str
+    reaction: str
+    severity: str
+
+class ClinicalProfileMedication(BaseModel):
+    name: str
+    dosage: str
+    frequency: str
+
+class PatientClinicalProfileResponse(BaseModel):
+    id: int
+    nombre: str
+    edad: int | None
+    sexo: str | None
+    alergias: list[ClinicalProfileAllergy]
+    medicamentos_actuales: list[ClinicalProfileMedication]

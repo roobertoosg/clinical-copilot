@@ -6,6 +6,39 @@ import AIResults from '../components/AIResults'
 function ClinicalWorkspace() {
   const [loading, setLoading] = useState(false)
   const [aiResponse, setAiResponse] = useState(null)
+  const [patientData, setPatientData] = useState(null)
+  const [patientLoading, setPatientLoading] = useState(false)
+
+  const fetchPatientProfile = async (id) => {
+    if (!id) {
+      setPatientData(null)
+      return
+    }
+
+    setPatientLoading(true)
+    try {
+      const response = await fetch(
+        `http://localhost:8000/patients/${id}/clinical-profile`
+      )
+
+      if (!response.ok) {
+        setPatientData(null)
+        if (response.status !== 404) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.detail || `Error ${response.status}`)
+        }
+        return
+      }
+
+      const data = await response.json()
+      setPatientData(data)
+    } catch (error) {
+      setPatientData(null)
+      alert(`Error al cargar el perfil del paciente: ${error.message}`)
+    } finally {
+      setPatientLoading(false)
+    }
+  }
 
   const handleProcessConsultation = async (payload) => {
     setLoading(true)
@@ -37,9 +70,13 @@ function ClinicalWorkspace() {
 
   return (
     <div className="workspace-grid">
-      <PatientProfile />
+      <PatientProfile patientData={patientData} loading={patientLoading} />
       <section className="workspace-center">
-        <ConsultationForm onProcess={handleProcessConsultation} loading={loading} />
+        <ConsultationForm
+          onProcess={handleProcessConsultation}
+          loading={loading}
+          onPatientLookup={fetchPatientProfile}
+        />
       </section>
       <section className="workspace-right">
         <AIResults aiResponse={aiResponse} loading={loading} />

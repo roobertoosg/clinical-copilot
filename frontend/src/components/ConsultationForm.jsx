@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-function ConsultationForm({ onProcess, loading }) {
+function ConsultationForm({ onProcess, loading, onPatientLookup }) {
   const [patientId, setPatientId] = useState(1)
   const [vitalSigns, setVitalSigns] = useState('')
   const [physicalExam, setPhysicalExam] = useState('')
@@ -16,6 +16,10 @@ function ConsultationForm({ onProcess, loading }) {
     })
   }
 
+  const handleLookup = () => {
+    onPatientLookup?.(patientId)
+  }
+
   return (
     <form className="consultation-doc" onSubmit={handleSubmit}>
       <div className="doc-header">
@@ -25,15 +29,25 @@ function ConsultationForm({ onProcess, loading }) {
         </p>
       </div>
 
-      <div className="doc-field doc-field--inline">
+      <div className="doc-field">
         <label htmlFor="patient_id">ID del paciente</label>
-        <input
-          id="patient_id"
-          type="number"
-          min="1"
-          value={patientId}
-          onChange={(e) => setPatientId(Number(e.target.value))}
-        />
+        <div className="patient-id-row">
+          <input
+            id="patient_id"
+            type="number"
+            min="1"
+            value={patientId}
+            onChange={(e) => setPatientId(Number(e.target.value))}
+            onBlur={handleLookup}
+          />
+          <button
+            type="button"
+            className="lookup-button"
+            onClick={handleLookup}
+          >
+            Buscar
+          </button>
+        </div>
       </div>
 
       <div className="doc-field">

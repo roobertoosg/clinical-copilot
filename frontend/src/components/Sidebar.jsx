@@ -8,9 +8,9 @@ const navItems = [
   { to: '/historial', label: 'Historial', icon: '↺' },
 ]
 
-function Sidebar() {
+function Sidebar({ isCollapsed, toggleSidebar }) {
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${isCollapsed ? ' sidebar--collapsed' : ''}`}>
       <div className="sidebar-brand">
         <div className="brand-icon" aria-hidden="true" />
         <div className="sidebar-brand-text">
@@ -18,6 +18,18 @@ function Sidebar() {
           <span className="sidebar-brand-subtitle">Asistente clínico</span>
         </div>
       </div>
+
+      <button
+        type="button"
+        className="sidebar-toggle"
+        onClick={toggleSidebar}
+        aria-label={isCollapsed ? 'Expandir menú' : 'Colapsar menú'}
+        title={isCollapsed ? 'Expandir menú' : 'Colapsar menú'}
+      >
+        <span className="sidebar-toggle-icon" aria-hidden="true">
+          {isCollapsed ? '»' : '«'}
+        </span>
+      </button>
 
       <nav className="sidebar-nav" aria-label="Navegación principal">
         {navItems.map(({ to, label, icon, end }) => (
@@ -28,11 +40,12 @@ function Sidebar() {
             className={({ isActive }) =>
               `sidebar-link${isActive ? ' sidebar-link--active' : ''}`
             }
+            title={label}
           >
             <span className="sidebar-link-icon" aria-hidden="true">
               {icon}
             </span>
-            <span className="sidebar-link-label">{label}</span>
+            <span className="sidebar-link-text">{label}</span>
           </NavLink>
         ))}
       </nav>
@@ -40,7 +53,7 @@ function Sidebar() {
       <div className="sidebar-footer">
         <span className="header-badge">
           <span className="header-badge-dot" aria-hidden="true" />
-          IA activa
+          <span className="sidebar-link-text">IA activa</span>
         </span>
       </div>
     </aside>

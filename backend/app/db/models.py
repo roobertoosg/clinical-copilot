@@ -22,7 +22,12 @@ class Allergy(Base):
     __tablename__ = "allergies"
 
     id = Column(Integer, primary_key=True, index=True)
-    patient_id = Column(Integer, ForeignKey("patients.id"))
+    patient_id = Column(
+        Integer,
+        ForeignKey("patients.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     allergen = Column(String) # Ej: Penicilina
     reaction = Column(String) # Ej: Erupción cutánea
     severity = Column(String) # Ej: Leve, Moderada, Severa
@@ -33,7 +38,12 @@ class Medication(Base):
     __tablename__ = "medications"
 
     id = Column(Integer, primary_key=True, index=True)
-    patient_id = Column(Integer, ForeignKey("patients.id"))
+    patient_id = Column(
+        Integer,
+        ForeignKey("patients.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     name = Column(String) # Ej: Paracetamol
     dosage = Column(String) # Ej: 500mg
     frequency = Column(String) # Ej: Cada 8 horas
@@ -45,7 +55,12 @@ class Consultation(Base):
     __tablename__ = "consultations"
 
     id = Column(Integer, primary_key=True, index=True)
-    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False, index=True)
+    patient_id = Column(
+        Integer,
+        ForeignKey("patients.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     date = Column(DateTime, default=datetime.utcnow, nullable=False)
     reason = Column(Text, nullable=True)          # Motivo de la consulta / resumen
     transcription = Column(Text, nullable=True)   # Transcripción de la conversación
@@ -53,21 +68,25 @@ class Consultation(Base):
 
     patient = relationship("Patient", back_populates="consultations")
     # Al eliminar una consulta se eliminan sus registros clínicos asociados
+    # (passive_deletes delega el borrado en cascada a PostgreSQL vía ondelete)
     clinical_note = relationship(
         "ClinicalNote",
         back_populates="consultation",
         uselist=False,
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     prescriptions = relationship(
         "Prescription",
         back_populates="consultation",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     alerts = relationship(
         "ClinicalAlert",
         back_populates="consultation",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
@@ -77,7 +96,12 @@ class ClinicalNote(Base):
     __tablename__ = "clinical_notes"
 
     id = Column(Integer, primary_key=True, index=True)
-    consultation_id = Column(Integer, ForeignKey("consultations.id"), nullable=False, index=True)
+    consultation_id = Column(
+        Integer,
+        ForeignKey("consultations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     subjective = Column(Text, nullable=True)
     objective = Column(Text, nullable=True)
     analysis = Column(Text, nullable=True)
@@ -91,7 +115,12 @@ class Prescription(Base):
     __tablename__ = "prescriptions"
 
     id = Column(Integer, primary_key=True, index=True)
-    consultation_id = Column(Integer, ForeignKey("consultations.id"), nullable=False, index=True)
+    consultation_id = Column(
+        Integer,
+        ForeignKey("consultations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     medication = Column(String, nullable=False)
     dose = Column(String, nullable=True)
     frequency = Column(String, nullable=True)
@@ -105,7 +134,12 @@ class ClinicalAlert(Base):
     __tablename__ = "clinical_alerts"
 
     id = Column(Integer, primary_key=True, index=True)
-    consultation_id = Column(Integer, ForeignKey("consultations.id"), nullable=False, index=True)
+    consultation_id = Column(
+        Integer,
+        ForeignKey("consultations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     alert_type = Column(String, nullable=True)   # Ej: alergia, interacción, dato faltante
     description = Column(Text, nullable=False)
     severity = Column(String, nullable=True)     # Ej: baja, media, alta

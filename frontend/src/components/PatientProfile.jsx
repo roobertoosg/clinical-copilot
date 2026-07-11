@@ -1,54 +1,59 @@
-const demoPatient = {
-  firstName: 'María',
-  lastName: 'González',
-  age: 42,
-  gender: 'Femenino',
-  documentId: 'HC-000123',
-  allergies: [
-    { allergen: 'Penicilina', severity: 'Severa' },
-    { allergen: 'Sulfamidas', severity: 'Moderada' },
-    { allergen: 'Mariscos', severity: 'Leve' },
-  ],
-  history: [
-    'Hipertensión arterial (2018)',
-    'Diabetes mellitus tipo 2 (2020)',
-    'Colecistectomía (2015)',
-  ],
-  medications: [
-    { name: 'Metformina', dosage: '850 mg', frequency: 'cada 12 h' },
-    { name: 'Losartán', dosage: '50 mg', frequency: 'cada 24 h' },
-    { name: 'Ácido acetilsalicílico', dosage: '100 mg', frequency: 'cada 24 h' },
-  ],
-}
+function PatientProfile({ patientData, loading }) {
+  if (loading) {
+    return (
+      <aside className="patient-profile patient-profile--empty">
+        <span className="loading-spinner" aria-hidden="true" />
+        <p className="profile-placeholder-text">Cargando perfil del paciente…</p>
+      </aside>
+    )
+  }
 
-function PatientProfile({ patient = demoPatient }) {
-  const initials = `${patient.firstName?.[0] ?? ''}${patient.lastName?.[0] ?? ''}`
+  if (!patientData) {
+    return (
+      <aside className="patient-profile patient-profile--empty">
+        <div className="empty-icon" aria-hidden="true" />
+        <p className="profile-placeholder-text">
+          Ingrese un ID de paciente para cargar su perfil.
+        </p>
+      </aside>
+    )
+  }
+
+  const { nombre, edad, sexo, alergias, medicamentos_actuales } = patientData
+  const initials = (nombre || '')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase()
 
   return (
     <aside className="patient-profile">
       <div className="patient-profile-head">
         <div className="patient-avatar" aria-hidden="true">
-          {initials}
+          {initials || '—'}
         </div>
         <div>
-          <h2 className="patient-name">
-            {patient.firstName} {patient.lastName}
-          </h2>
+          <h2 className="patient-name">{nombre}</h2>
           <p className="patient-meta">
-            {patient.age} años · {patient.gender}
+            {edad != null ? `${edad} años` : 'Edad no registrada'}
+            {sexo ? ` · ${sexo}` : ''}
           </p>
-          <p className="patient-doc">{patient.documentId}</p>
+          <p className="patient-doc">ID: {patientData.id}</p>
         </div>
       </div>
 
       <section className="profile-section">
         <h3 className="profile-section-title">Alergias</h3>
-        {patient.allergies?.length > 0 ? (
+        {alergias?.length > 0 ? (
           <div className="allergy-tags">
-            {patient.allergies.map((a) => (
-              <span key={a.allergen} className="allergy-tag">
+            {alergias.map((a, index) => (
+              <span key={index} className="allergy-tag">
                 {a.allergen}
-                <span className="allergy-tag-severity">{a.severity}</span>
+                {a.severity && (
+                  <span className="allergy-tag-severity">{a.severity}</span>
+                )}
               </span>
             ))}
           </div>
@@ -58,27 +63,14 @@ function PatientProfile({ patient = demoPatient }) {
       </section>
 
       <section className="profile-section">
-        <h3 className="profile-section-title">Antecedentes</h3>
-        {patient.history?.length > 0 ? (
-          <ul className="history-list">
-            {patient.history.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        ) : (
-          <p className="profile-empty">Sin antecedentes registrados</p>
-        )}
-      </section>
-
-      <section className="profile-section">
         <h3 className="profile-section-title">Medicamentos actuales</h3>
-        {patient.medications?.length > 0 ? (
+        {medicamentos_actuales?.length > 0 ? (
           <ul className="current-med-list">
-            {patient.medications.map((m) => (
-              <li key={m.name}>
+            {medicamentos_actuales.map((m, index) => (
+              <li key={index}>
                 <span className="current-med-name">{m.name}</span>
                 <span className="current-med-detail">
-                  {m.dosage} · {m.frequency}
+                  {[m.dosage, m.frequency].filter(Boolean).join(' · ')}
                 </span>
               </li>
             ))}
