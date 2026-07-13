@@ -1,4 +1,5 @@
-from typing import Dict, List
+from datetime import datetime
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, field_validator
 
@@ -44,6 +45,9 @@ class AIClinicalOutput(BaseModel):
     receta: List[PrescriptionItem]
     resumen_paciente: str
     alertas: List[AlertItem] = []
+    # Folio de la consulta ya persistida (lo rellena el router tras guardar);
+    # permite al frontend exportar el PDF inmediatamente desde el Workspace.
+    folio: Optional[str] = None
 
     @field_validator("receta", mode="before")
     @classmethod
@@ -72,3 +76,32 @@ class AIClinicalOutput(BaseModel):
             else:
                 coerced.append(item)
         return coerced
+
+
+# ── Esquemas de consulta (expediente) ──────────────────────────
+
+class ConsultationListItem(BaseModel):
+    """Fila del listado de consultas (vista /consultas)."""
+
+    id: int
+    folio: Optional[str]
+    date: Optional[datetime]
+    status: Optional[str]
+    patient_id: int
+    patient_name: str
+
+
+class ConsultationDetail(BaseModel):
+    """Detalle completo de una consulta (SOAPE + receta + alertas)."""
+
+    id: int
+    folio: Optional[str]
+    date: Optional[datetime]
+    status: Optional[str]
+    patient_id: int
+    patient_name: str
+    resumen_paciente: Optional[str]
+    soape: Dict
+    diagnosticos_sugeridos: List[Dict]
+    receta: List[PrescriptionItem]
+    alertas: List[AlertItem]

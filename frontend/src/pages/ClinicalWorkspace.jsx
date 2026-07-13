@@ -70,7 +70,11 @@ function ClinicalWorkspace() {
 
   return (
     <div className="workspace-grid">
-      <PatientProfile patientData={patientData} loading={patientLoading} />
+      <PatientProfile
+        patientData={patientData}
+        loading={patientLoading}
+        onPatientLookup={fetchPatientProfile}
+      />
       <section className="workspace-center">
         <ConsultationForm
           onProcess={handleProcessConsultation}

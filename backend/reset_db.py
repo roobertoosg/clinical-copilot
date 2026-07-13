@@ -10,10 +10,31 @@ Uso:
     python reset_db.py
 """
 
-from app.db.session import Base, engine
+from app.db.session import Base, SessionLocal, engine
 
 # Importar los modelos registra todas las tablas en Base.metadata
 from app.db import models  # noqa: F401
+from app.db.models import Doctor
+
+
+def seed_data() -> None:
+    """Inserta datos base de desarrollo (un doctor de prueba)."""
+    db = SessionLocal()
+    try:
+        doctor = Doctor(
+            full_name="Dr. Ricardo Mendoza",
+            specialty="Medicina Interna",
+            license_number="12345678",
+        )
+        db.add(doctor)
+        db.commit()
+        db.refresh(doctor)
+        print(
+            f"👨‍⚕️  Doctor de prueba creado: {doctor.full_name} "
+            f"(ID {doctor.id}, cédula {doctor.license_number})."
+        )
+    finally:
+        db.close()
 
 
 def reset_database() -> None:
@@ -24,6 +45,9 @@ def reset_database() -> None:
     print("🛠️  Recreando tablas desde los modelos...")
     Base.metadata.create_all(bind=engine)
     print("✅ Tablas recreadas correctamente.")
+
+    print("🌱 Insertando datos base (seed)...")
+    seed_data()
 
     tablas = ", ".join(sorted(Base.metadata.tables.keys()))
     print(f"📋 Esquema actual: {tablas}")

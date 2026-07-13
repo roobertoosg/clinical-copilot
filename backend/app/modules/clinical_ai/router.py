@@ -4,12 +4,20 @@ import os
 import requests
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.db.models import Patient
+from app.db.models import Patient, Consultation, ClinicalNote, Doctor
 from app.db.session import get_db
 from . import crud
-from .schemas import AIClinicalOutput, ConsultationInput
+from .pdf_generator import generate_consultation_pdf
+from .schemas import (
+    AIClinicalOutput,
+    ConsultationInput,
+    ConsultationListItem,
+    ConsultationDetail,
+)
 
 load_dotenv()
 
@@ -111,9 +119,18 @@ def process_consultation(
     consultation: ConsultationInput,
     db: Session = Depends(get_db),
 ):
+    logger.info(
+        "Iniciando procesamiento de consulta para paciente ID: {id}",
+        id=consultation.patient_id,
+    )
+
     # 1. Buscar paciente
     patient = db.query(Patient).filter(Patient.id == consultation.patient_id).first()
     if patient is None:
+        logger.error(
+            "Paciente no encontrado (ID: {id}); se aborta el procesamiento.",
+            id=consultation.patient_id,
+        )
         raise HTTPException(status_code=404, detail="Paciente no encontrado")
 
     # 2. Construir los dos prompts separados
@@ -131,6 +148,11 @@ def process_consultation(
 
     # 4. Procesar y aplicar lógica híbrida (IA + Python)
     try:
+        logger.debug(
+            "Enviando prompts al modelo local de Ollama ({model}) en {url}.",
+            model=payload["model"],
+            url=OLLAMA_URL,
+        )
         response = requests.post(OLLAMA_URL, json=payload)
         response.raise_for_status()
         
@@ -162,28 +184,165 @@ def process_consultation(
 
         # Validar la salida de la IA contra el esquema Pydantic
         ai_output = AIClinicalOutput(**result)
+        logger.success(
+            "La IA devolvió una respuesta estructurada válida para el paciente ID: {id}.",
+            id=patient.id,
+        )
 
         # 5. Persistir los resultados en PostgreSQL (transacción segura)
         try:
-            crud.save_consultation_results(
+            saved = crud.save_consultation_results(
                 db=db,
                 patient_id=patient.id,
                 input_data=consultation,
                 ai_output=ai_output,
             )
         except Exception as db_exc:
+            logger.error(
+                "Error al guardar la consulta en la base de datos: {err}",
+                err=db_exc,
+            )
             raise HTTPException(
                 status_code=500,
                 detail=f"Error al guardar la consulta en la base de datos: {db_exc}",
             ) from db_exc
 
-        # 6. Devolver el mismo JSON al frontend, ya persistido
+        # 6. Adjuntar el folio recién generado para que el frontend pueda
+        #    exportar el PDF directamente desde el Workspace.
+        ai_output.folio = saved.folio
+
+        # 7. Devolver el mismo JSON al frontend, ya persistido
         return ai_output
 
     except HTTPException:
         raise
     except Exception as exc:
+        logger.error("Error al procesar la consulta con IA: {err}", err=exc)
         raise HTTPException(
             status_code=500,
             detail=f"Error al procesar consulta con IA: {exc}",
         ) from exc
+
+
+def _patient_name(patient: Patient | None) -> str:
+    if patient is None:
+        return "Paciente desconocido"
+    return f"{patient.first_name} {patient.last_name}".strip()
+
+
+@router.get("/consultations", response_model=list[ConsultationListItem])
+def list_consultations(db: Session = Depends(get_db)):
+    """Lista todas las consultas con folio, paciente y fecha (más recientes primero)."""
+    consultations = (
+        db.query(Consultation).order_by(Consultation.date.desc()).all()
+    )
+    return [
+        ConsultationListItem(
+            id=c.id,
+            folio=c.folio,
+            date=c.date,
+            status=c.status,
+            patient_id=c.patient_id,
+            patient_name=_patient_name(c.patient),
+        )
+        for c in consultations
+    ]
+
+
+@router.get("/consultations/{folio}", response_model=ConsultationDetail)
+def get_consultation_detail(folio: str, db: Session = Depends(get_db)):
+    """Devuelve el detalle completo (SOAPE, receta y alertas) de una consulta."""
+    consultation = (
+        db.query(Consultation).filter(Consultation.folio == folio).first()
+    )
+    if consultation is None:
+        raise HTTPException(status_code=404, detail="Consulta no encontrada")
+
+    note: ClinicalNote | None = consultation.clinical_note
+    soape = {
+        "subjetivo": note.subjective if note else "",
+        "objetivo": note.objective if note else "",
+        "analisis": note.analysis if note else "",
+        "plan": note.plan if note else "",
+        "evaluacion": note.evaluation if note else "",
+    }
+
+    receta = [
+        {
+            "medicamento": p.medication or "",
+            "dosis": p.dose or "",
+            "frecuencia": p.frequency or "",
+            "duracion": p.duration or "",
+            "indicaciones": p.indications or "",
+        }
+        for p in consultation.prescriptions
+    ]
+
+    alertas = [
+        {
+            "tipo": a.alert_type or "clinica",
+            "descripcion": a.description or "",
+            "severidad": a.severity or "Media",
+        }
+        for a in consultation.alerts
+    ]
+
+    diagnosticos = [
+        {
+            "codigo": d.codigo or "",
+            "descripcion": d.description or "",
+            "probabilidad": d.probabilidad or "",
+        }
+        for d in consultation.diagnostics
+    ]
+
+    return ConsultationDetail(
+        id=consultation.id,
+        folio=consultation.folio,
+        date=consultation.date,
+        status=consultation.status,
+        patient_id=consultation.patient_id,
+        patient_name=_patient_name(consultation.patient),
+        resumen_paciente=consultation.reason,
+        soape=soape,
+        diagnosticos_sugeridos=diagnosticos,
+        receta=receta,
+        alertas=alertas,
+    )
+
+
+@router.get("/consultations/{folio}/export-pdf")
+def export_consultation_pdf(folio: str, db: Session = Depends(get_db)):
+    """Genera y descarga el PDF de una consulta (reportlab.platypus)."""
+    consultation = (
+        db.query(Consultation).filter(Consultation.folio == folio).first()
+    )
+    if consultation is None:
+        raise HTTPException(status_code=404, detail="Consulta no encontrada")
+
+    # Recabar todos los datos necesarios (incluyendo al doctor asociado)
+    patient = consultation.patient
+    doctor = (
+        db.query(Doctor).filter(Doctor.id == consultation.doctor_id).first()
+        if consultation.doctor_id
+        else None
+    )
+    note = consultation.clinical_note
+    prescriptions = list(consultation.prescriptions)
+    diagnostics = list(consultation.diagnostics)
+
+    pdf_buffer = generate_consultation_pdf(
+        consultation=consultation,
+        patient=patient,
+        doctor=doctor,
+        note=note,
+        prescriptions=prescriptions,
+        diagnostics=diagnostics,
+    )
+
+    filename = f"consulta_{consultation.folio or consultation.id}.pdf"
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

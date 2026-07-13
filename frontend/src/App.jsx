@@ -2,42 +2,20 @@ import { Routes, Route } from 'react-router-dom'
 import './App.css'
 import MainLayout from './components/MainLayout'
 import ClinicalWorkspace from './pages/ClinicalWorkspace'
+import DashboardPage from './pages/DashboardPage'
 import PatientsPage from './pages/PatientsPage'
-import PlaceholderPage from './pages/PlaceholderPage'
+import ConsultationsPage from './pages/ConsultationsPage'
+import HistoryPage from './pages/HistoryPage'
 
 function App() {
   return (
     <Routes>
       <Route element={<MainLayout />}>
         <Route index element={<ClinicalWorkspace />} />
-        <Route
-          path="dashboard"
-          element={
-            <PlaceholderPage
-              title="Dashboard"
-              description="Panel general con métricas y actividad reciente."
-            />
-          }
-        />
+        <Route path="dashboard" element={<DashboardPage />} />
         <Route path="pacientes" element={<PatientsPage />} />
-        <Route
-          path="consultas"
-          element={
-            <PlaceholderPage
-              title="Consultas"
-              description="Listado de consultas registradas."
-            />
-          }
-        />
-        <Route
-          path="historial"
-          element={
-            <PlaceholderPage
-              title="Historial"
-              description="Historial clínico y notas previas."
-            />
-          }
-        />
+        <Route path="consultas" element={<ConsultationsPage />} />
+        <Route path="historial" element={<HistoryPage />} />
       </Route>
     </Routes>
   )
