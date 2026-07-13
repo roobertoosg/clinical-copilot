@@ -1,9 +1,12 @@
 import json
 import os
+import tempfile
 
+import google.generativeai as genai
 import requests
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, HTTPException
+from faster_whisper import WhisperModel
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -14,6 +17,7 @@ from . import crud
 from .pdf_generator import generate_consultation_pdf
 from .schemas import (
     AIClinicalOutput,
+    GeminiClinicalOutput,
     ConsultationInput,
     ConsultationListItem,
     ConsultationDetail,
@@ -24,6 +28,22 @@ load_dotenv()
 router = APIRouter(prefix="/clinical-ai", tags=["Clinical AI"])
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+
+# Configuración de Gemini (la llave se toma del entorno; se asume ya presente)
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+GEMINI_MODEL_NAME = "gemini-3.5-flash"
+
+# Modelo Whisper cacheado a nivel de módulo: se carga una sola vez (la primera
+# petición) y se reutiliza en las siguientes para no recargarlo en cada request.
+_whisper_model: WhisperModel | None = None
+
+
+def _get_whisper_model() -> WhisperModel:
+    global _whisper_model
+    if _whisper_model is None:
+        # "base" ofrece un buen equilibrio velocidad/calidad en desarrollo (CPU).
+        _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+    return _whisper_model
 
 
 def _build_prompts(patient: Patient, consultation: ConsultationInput) -> tuple[str, str]:
@@ -133,34 +153,102 @@ def process_consultation(
         )
         raise HTTPException(status_code=404, detail="Paciente no encontrado")
 
-    # 2. Construir los dos prompts separados
+    # 2. Construir los prompts (compartidos por ambos proveedores)
     system_prompt, user_prompt = _build_prompts(patient, consultation)
-    
-    # 3. Armar el payload para Ollama
-    payload = {
-        "model": "llama3.1",
-        "system": system_prompt,
-        "prompt": user_prompt,
-        "format": "json",
-        "stream": False,
-        "options": {"temperature": 0.0}
-    }
 
-    # 4. Procesar y aplicar lógica híbrida (IA + Python)
+    provider = (consultation.ai_provider or "gemini").strip().lower()
+
+    # 3-4. Obtener la respuesta de la IA según el proveedor seleccionado
     try:
-        logger.debug(
-            "Enviando prompts al modelo local de Ollama ({model}) en {url}.",
-            model=payload["model"],
-            url=OLLAMA_URL,
-        )
-        response = requests.post(OLLAMA_URL, json=payload)
-        response.raise_for_status()
-        
-        # Extraer el string y convertirlo a diccionario de Python
-        respuesta_texto = response.json().get("response", "{}")
-        result = json.loads(respuesta_texto)
-        
-        # --- INICIO DE VALIDACIÓN MANUAL (PYTHON) ---
+        if provider == "gemini":
+            # --- Proveedor en la nube: Gemini ---
+            logger.info(
+                "Procesando con Gemini API (modelo: {model})",
+                model=GEMINI_MODEL_NAME,
+            )
+            try:
+                model = genai.GenerativeModel(
+                    model_name=GEMINI_MODEL_NAME,
+                    system_instruction=system_prompt,
+                )
+                logger.debug(
+                    "Enviando prompt a Gemini con esquema estricto GeminiClinicalOutput"
+                )
+                response = model.generate_content(
+                    user_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        response_mime_type="application/json",
+                        response_schema=GeminiClinicalOutput,
+                        temperature=0.0,
+                    ),
+                )
+
+                if not response.text:
+                    logger.error("Gemini devolvió una respuesta vacía.")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Gemini devolvió una respuesta vacía.",
+                    )
+
+                logger.debug(
+                    "Texto crudo de Gemini recibido ({n} caracteres).",
+                    n=len(response.text),
+                )
+                try:
+                    result = json.loads(response.text)
+                except json.JSONDecodeError as json_exc:
+                    logger.error(
+                        "Error al parsear JSON de Gemini: {err}. Fragmento: {text}",
+                        err=json_exc,
+                        text=response.text[:500],
+                    )
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"La respuesta de Gemini no es un JSON válido: {json_exc}",
+                    ) from json_exc
+
+                logger.success(
+                    "Respuesta estructurada de Gemini recibida. Claves: {keys}",
+                    keys=list(result.keys()),
+                )
+
+            except HTTPException:
+                raise
+            except Exception as gemini_exc:
+                logger.exception("Error durante la llamada a Gemini API")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error al procesar consulta con Gemini: {gemini_exc}",
+                ) from gemini_exc
+
+        elif provider == "ollama":
+            # --- Proveedor local: Ollama ---
+            logger.info("Procesando con modelo local Ollama")
+            payload = {
+                "model": "llama3.1",
+                "system": system_prompt,
+                "prompt": user_prompt,
+                "format": "json",
+                "stream": False,
+                "options": {"temperature": 0.0},
+            }
+            logger.debug(
+                "Enviando prompts al modelo local de Ollama ({model}) en {url}.",
+                model=payload["model"],
+                url=OLLAMA_URL,
+            )
+            response = requests.post(OLLAMA_URL, json=payload)
+            response.raise_for_status()
+            respuesta_texto = response.json().get("response", "{}")
+            result = json.loads(respuesta_texto)
+
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Proveedor de IA no soportado: {consultation.ai_provider}",
+            )
+
+        # --- INICIO DE VALIDACIÓN MANUAL (PYTHON), común a ambos proveedores ---
         # Asegurar que exista la lista de alertas
         if "alertas" not in result or result["alertas"] is None:
             result["alertas"] = []
@@ -182,11 +270,25 @@ def process_consultation(
         result.setdefault("resumen_paciente", "")
         # --- FIN DE VALIDACIÓN MANUAL ---
 
-        # Validar la salida de la IA contra el esquema Pydantic
-        ai_output = AIClinicalOutput(**result)
+        # Validar la salida de la IA contra el esquema Pydantic original
+        try:
+            ai_output = AIClinicalOutput(**result)
+        except Exception as validation_exc:
+            logger.error(
+                "Error al mapear la respuesta de {provider} a AIClinicalOutput: {err}",
+                provider=provider,
+                err=validation_exc,
+            )
+            logger.debug("Payload recibido para validación: {payload}", payload=result)
+            raise HTTPException(
+                status_code=500,
+                detail=f"La respuesta de la IA no cumple el esquema esperado: {validation_exc}",
+            ) from validation_exc
+
         logger.success(
-            "La IA devolvió una respuesta estructurada válida para el paciente ID: {id}.",
+            "La IA devolvió una respuesta estructurada válida para el paciente ID: {id} (proveedor: {provider}).",
             id=patient.id,
+            provider=provider,
         )
 
         # 5. Persistir los resultados en PostgreSQL (transacción segura)
@@ -222,6 +324,46 @@ def process_consultation(
             status_code=500,
             detail=f"Error al procesar consulta con IA: {exc}",
         ) from exc
+
+
+@router.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Transcribe un archivo de audio a texto usando faster-whisper (Whisper 'base')."""
+    logger.info("Recibiendo archivo de audio para transcripción...")
+
+    temp_path: str | None = None
+    try:
+        # 1. Guardar el audio subido en un archivo temporal
+        suffix = os.path.splitext(file.filename or "")[1] or ".webm"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            temp_file.write(await file.read())
+            temp_path = temp_file.name
+
+        # 2. Cargar el modelo y transcribir
+        logger.debug("Cargando modelo Whisper y procesando audio...")
+        model = _get_whisper_model()
+        segments, _info = model.transcribe(temp_path)
+
+        # 3. Concatenar los segmentos de texto resultantes
+        texto_completo = "".join(segment.text for segment in segments).strip()
+
+        logger.success(
+            "Audio transcrito correctamente. Longitud: {n} caracteres.",
+            n=len(texto_completo),
+        )
+        return {"transcription": texto_completo}
+
+    except Exception as exc:
+        logger.exception("Error durante la transcripción")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error durante la transcripción: {exc}",
+        ) from exc
+
+    finally:
+        # 4. Eliminar el archivo temporal siempre (haya o no error)
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 def _patient_name(patient: Patient | None) -> str:

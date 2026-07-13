@@ -13,6 +13,15 @@ function ConsultationForm({ onProcess, loading, onPatientLookup }) {
   const [physicalExam, setPhysicalExam] = useState('')
   const [conversationText, setConversationText] = useState('')
 
+  // Proveedor de IA seleccionado: 'gemini' (nube) u 'ollama' (local)
+  const [aiProvider, setAiProvider] = useState('gemini')
+
+  // Grabación de audio (Speech-to-Text)
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
+
   // Evita relanzar la búsqueda inmediatamente después de elegir un paciente
   const skipSearchRef = useRef(false)
   const wrapperRef = useRef(null)
@@ -71,6 +80,69 @@ function ConsultationForm({ onProcess, loading, onPatientLookup }) {
     onPatientLookup?.(patient.id)
   }
 
+  const transcribeBlob = async (blob) => {
+    setIsTranscribing(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', blob, 'grabacion.webm')
+      const response = await fetch(`${API_BASE}/clinical-ai/transcribe`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.detail || `Error ${response.status}`)
+      }
+      const data = await response.json()
+      const text = (data.transcription || '').trim()
+      if (text) {
+        // Concatena al final de las notas, separando con salto de línea si ya había texto
+        setConversationText((prev) => (prev.trim() ? `${prev}\n${text}` : text))
+      }
+    } catch (error) {
+      alert(`No se pudo transcribir el audio: ${error.message}`)
+    } finally {
+      setIsTranscribing(false)
+    }
+  }
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      audioChunksRef.current = []
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+      recorder.onstop = async () => {
+        // Libera el micrófono
+        stream.getTracks().forEach((track) => track.stop())
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        await transcribeBlob(blob)
+      }
+
+      mediaRecorderRef.current = recorder
+      recorder.start()
+      setIsRecording(true)
+    } catch (error) {
+      alert(`No se pudo acceder al micrófono: ${error.message}`)
+    }
+  }
+
+  const stopRecording = () => {
+    const recorder = mediaRecorderRef.current
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop()
+    }
+    setIsRecording(false)
+  }
+
+  const handleToggleRecording = () => {
+    if (isRecording) stopRecording()
+    else startRecording()
+  }
+
   const handleSubmit = (event) => {
     event.preventDefault()
     if (!patientId) return
@@ -79,16 +151,60 @@ function ConsultationForm({ onProcess, loading, onPatientLookup }) {
       conversation_text: conversationText,
       vital_signs: vitalSigns,
       physical_exam: physicalExam,
+      ai_provider: aiProvider,
     })
   }
 
   return (
     <form className="consultation-doc" onSubmit={handleSubmit}>
       <div className="doc-header">
-        <h2 className="doc-title">Captura de consulta</h2>
-        <p className="doc-subtitle">
-          Registre los datos clínicos y procese con la IA.
-        </p>
+        <div className="doc-header-top">
+          <div>
+            <h2 className="doc-title">Captura de consulta</h2>
+            <p className="doc-subtitle">
+              Registre los datos clínicos y procese con la IA.
+            </p>
+          </div>
+
+          <div
+            className="ai-provider-switch"
+            role="group"
+            aria-label="Proveedor de IA"
+          >
+            <button
+              type="button"
+              className={`ai-provider-option${
+                aiProvider === 'gemini' ? ' ai-provider-option--active' : ''
+              }`}
+              onClick={() => setAiProvider('gemini')}
+              aria-pressed={aiProvider === 'gemini'}
+            >
+              <span className="ai-provider-icon" aria-hidden="true">
+                ✨
+              </span>
+              <span className="ai-provider-text">
+                <span className="ai-provider-name">Gemini</span>
+                <span className="ai-provider-tag">Cloud · Recomendado</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              className={`ai-provider-option${
+                aiProvider === 'ollama' ? ' ai-provider-option--active' : ''
+              }`}
+              onClick={() => setAiProvider('ollama')}
+              aria-pressed={aiProvider === 'ollama'}
+            >
+              <span className="ai-provider-icon" aria-hidden="true">
+                🦙
+              </span>
+              <span className="ai-provider-text">
+                <span className="ai-provider-name">Ollama</span>
+                <span className="ai-provider-tag">Local</span>
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="doc-field">
@@ -158,7 +274,30 @@ function ConsultationForm({ onProcess, loading, onPatientLookup }) {
       </div>
 
       <div className="doc-field doc-field--grow">
-        <label htmlFor="conversation_text">Conversación / Notas</label>
+        <div className="doc-field-label-row">
+          <label htmlFor="conversation_text">Conversación / Notas</label>
+          <button
+            type="button"
+            className={`mic-button${isRecording ? ' mic-button--recording' : ''}`}
+            onClick={handleToggleRecording}
+            disabled={isTranscribing}
+            title={isRecording ? 'Detener grabación' : 'Grabar audio'}
+          >
+            {isTranscribing ? (
+              <>
+                <span className="loading-spinner loading-spinner--sm" aria-hidden="true" />
+                Transcribiendo…
+              </>
+            ) : isRecording ? (
+              <>
+                <span className="mic-button-dot" aria-hidden="true" />
+                Detener Grabación
+              </>
+            ) : (
+              <>🎤 Grabar Audio</>
+            )}
+          </button>
+        </div>
         <textarea
           id="conversation_text"
           rows={12}

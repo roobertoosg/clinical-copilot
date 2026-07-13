@@ -9,6 +9,8 @@ class ConsultationInput(BaseModel):
     conversation_text: str
     vital_signs: str = "No registrados"
     physical_exam: str = "No registrado"
+    # Proveedor de IA a utilizar: "gemini" (nube) u "ollama" (local)
+    ai_provider: str = "gemini"
 
 
 class PrescriptionItem(BaseModel):
@@ -76,6 +78,50 @@ class AIClinicalOutput(BaseModel):
             else:
                 coerced.append(item)
         return coerced
+
+
+# ── Esquemas estrictos para Gemini (sin defaults) ──────────────
+# El SDK de google.generativeai falla al traducir esquemas Pydantic que
+# contienen valores por defecto ("Unknown field for Schema: default").
+# Estos modelos son exclusivos para response_schema en generate_content.
+
+
+class GeminiSoape(BaseModel):
+    subjetivo: str
+    objetivo: str
+    analisis: str
+    plan: str
+    evaluacion: str
+
+
+class GeminiDiagnosticItem(BaseModel):
+    codigo: str
+    descripcion: str
+    probabilidad: str
+
+
+class GeminiPrescriptionItem(BaseModel):
+    medicamento: str
+    dosis: str
+    frecuencia: str
+    duracion: str
+    indicaciones: str
+
+
+class GeminiAlertItem(BaseModel):
+    tipo: str
+    descripcion: str
+    severidad: str
+
+
+class GeminiClinicalOutput(BaseModel):
+    """Copia estricta de AIClinicalOutput para el motor de Gemini (sin defaults)."""
+
+    soape: GeminiSoape
+    diagnosticos_sugeridos: List[GeminiDiagnosticItem]
+    receta: List[GeminiPrescriptionItem]
+    resumen_paciente: str
+    alertas: List[GeminiAlertItem]
 
 
 # ── Esquemas de consulta (expediente) ──────────────────────────
