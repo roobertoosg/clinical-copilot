@@ -8,6 +8,7 @@ from app.modules.patients import router as patients_router # <-- NUEVA IMPORTACI
 from app.modules.clinical_ai import router as ai_router
 from app.modules.system import router as system_router
 from app.modules.dashboard import router as dashboard_router
+from app.modules.clinical_rag import router as clinical_rag_router
 
 # Crea las tablas (y verifica la conexión con PostgreSQL)
 try:
@@ -37,6 +38,7 @@ app.include_router(patients_router.router)
 app.include_router(ai_router.router)
 app.include_router(system_router.router)
 app.include_router(dashboard_router.router)
+app.include_router(clinical_rag_router.router)
 
 @app.get("/health", tags=["System"])
 def health_check():

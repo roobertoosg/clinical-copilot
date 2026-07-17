@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+from datetime import date
 
 import google.generativeai as genai
 import requests
@@ -14,10 +15,10 @@ from sqlalchemy.orm import Session
 from app.db.models import Patient, Consultation, ClinicalNote, Doctor
 from app.db.session import get_db
 from . import crud
+from .gemini_pipeline import run_gemini_clinical_pipeline
 from .pdf_generator import generate_consultation_pdf
 from .schemas import (
     AIClinicalOutput,
-    GeminiClinicalOutput,
     ConsultationInput,
     ConsultationListItem,
     ConsultationDetail,
@@ -46,56 +47,46 @@ def _get_whisper_model() -> WhisperModel:
     return _whisper_model
 
 
+def _calculate_age(date_of_birth: date | None) -> int | None:
+    """Calcula la edad en años a partir de la fecha de nacimiento."""
+    if not date_of_birth:
+        return None
+    today = date.today()
+    return (
+        today.year
+        - date_of_birth.year
+        - ((today.month, today.day) < (date_of_birth.month, date_of_birth.day))
+    )
+
+
 def _build_prompts(patient: Patient, consultation: ConsultationInput) -> tuple[str, str]:
     # --- 1. SYSTEM PROMPT (La personalidad y reglas) ---
-    system_prompt = """Eres 'Clinical Copilot', un asistente médico inteligente de grado clínico.
-    
-TUS REGLAS ESTRICTAS:
-1. Actúa de forma profesional, objetiva y científica.
-2. DIAGNÓSTICOS: Prefiere diagnósticos sindromáticos (ej. Faringoamigdalitis aguda) y NO adivines el agente patógeno (bacterias/virus) sin pruebas de laboratorio. Usa códigos CIE-10 reales; si no estás seguro del código exacto, déjalo en blanco.
-3. No inventes información, síntomas o signos vitales que no estén en el texto provisto.
-4. Devuelve ÚNICAMENTE un JSON válido, sin texto antes ni después.
-5. Prioriza la seguridad: SIEMPRE compara los medicamentos a recetar con las alergias del paciente.
-6. BLOQUEO DE RECETA: Si detectas que el medicamento sugerido por el médico causa reacción cruzada o alergia, GENERA LA ALERTA, pero ESTÁ ESTRICTAMENTE PROHIBIDO incluir ese medicamento en la 'receta'. En su lugar, sugiere una alternativa segura o deja la receta vacía.
-7. ANCLAJE DE ATENCIÓN (FRAME): Al analizar la 'Conversación', busca activamente y dale máxima prioridad a las respuestas del paciente ante preguntas clave del médico como '¿Cuál es su malestar?', '¿Qué siente?', '¿Desde cuándo?' o '¿A qué es alérgico?'. Usa estas respuestas como tu fuente principal de verdad para estructurar la sección 'Subjetivo' del SOAPE.
+    system_prompt = """Eres 'Aura Clinical Copilot', un asistente médico inteligente y estricto de grado clínico.
 
-ESQUEMA DE SALIDA (OBLIGATORIO):
-Devuelve EXACTAMENTE esta estructura JSON. 'receta' y 'alertas' son SIEMPRE listas de objetos (nunca listas de texto plano).
+TUS REGLAS CRÍTICAS DE COMPORTAMIENTO:
+1. ANTI-BUCLES Y CONCISIÓN: ESTÁ ESTRICTAMENTE PROHIBIDO repetir la misma oración, frase o palabra de forma consecutiva. Sé clínico, directo y telegráfico.
+2. CERO ALUCINACIONES: No inventes información, síntomas, medicamentos, ni signos vitales que no estén explícitamente en el texto provisto. Utiliza EXACTAMENTE la edad proporcionada en los datos del paciente. NUNCA intentes calcularla ni modificarla.
+3. FORMATO ESTRICTO: Devuelve ÚNICAMENTE un JSON válido. NINGÚN texto antes, NINGÚN texto después, ni bloques de código markdown (```json).
+4. SEGURIDAD DEL PACIENTE (PRIORIDAD MÁXIMA): Compara SIEMPRE los medicamentos a recetar con las alergias registradas del paciente. Si hay riesgo de reacción cruzada o alergia, GENERA UNA ALERTA DE SEVERIDAD 'Alta' y OMITE ese medicamento de la receta. Sugiere una alternativa en el 'Plan'.
 
+REGLAS DE RAZONAMIENTO CLÍNICO (SOAPE Y DIAGNÓSTICOS):
+- SUBJETIVO: Extrae el malestar principal, evolución y síntomas referidos por el paciente en la conversación.
+- OBJETIVO: Basa esto en los 'Signos vitales' y 'Examen físico'. Si están vacíos o no se mencionan en la charla, usa estrictamente la frase: "Pendiente de exploración física completa". NUNCA lo dejes en blanco.
+- ANÁLISIS: Justifica brevemente por qué sugieres los diagnósticos basados en el Subjetivo y Objetivo.
+- PLAN: Define los pasos a seguir (laboratorios, tratamiento, reposo). Si no hay datos, infiere el siguiente paso lógico (ej. "Realizar exploración física y prescribir tratamiento sintomático").
+- DIAGNÓSTICOS: Usa diagnósticos sindromáticos con códigos CIE-10 reales. Si dudas del código, envíalo vacío "".
+
+ESTRUCTURA JSON OBLIGATORIA (Todas las claves deben existir):
 {
   "soape": {"subjetivo": "...", "objetivo": "...", "analisis": "...", "plan": "...", "evaluacion": "..."},
-  "diagnosticos_sugeridos": [{"codigo": "...", "descripcion": "...", "probabilidad": "..."}],
-  "receta": [
-    {"medicamento": "...", "dosis": "...", "frecuencia": "...", "duracion": "...", "indicaciones": "..."}
-  ],
+  "diagnosticos_sugeridos": [{"codigo": "...", "descripcion": "...", "probabilidad": "Alta|Media|Baja"}],
+  "receta": [{"medicamento": "...", "dosis": "...", "frecuencia": "...", "duracion": "...", "indicaciones": "..."}],
   "resumen_paciente": "...",
-  "alertas": [
-    {"tipo": "...", "descripcion": "...", "severidad": "..."}
-  ]
+  "alertas": [{"tipo": "alergia|interaccion|clinica", "descripcion": "...", "severidad": "Alta|Media|Baja"}]
 }
-
-REGLAS DE 'receta' (cada elemento es UN objeto por medicamento, todos los valores son string):
-- 'medicamento': nombre del fármaco (ej. "Amoxicilina").
-- 'dosis': cantidad por toma (ej. "500 mg").
-- 'frecuencia': cada cuánto (ej. "cada 8 horas").
-- 'duracion': por cuánto tiempo (ej. "7 días").
-- 'indicaciones': notas de administración (ej. "tomar con alimentos").
-- Si un dato no aplica o se desconoce, usa string vacío "". Si no hay receta, devuelve [].
-
-REGLAS DE 'alertas' (cada elemento es UN objeto por alerta, todos los valores son string):
-- 'tipo': categoría de la alerta. Usa 'alergia', 'interaccion' o 'clinica'.
-- 'descripcion': explicación clara del riesgo.
-- 'severidad': impacto clínico. Usa 'Alta', 'Media' o 'Baja'.
-- Si no hay alertas, devuelve [].
-
-EJEMPLO de 'receta':
-[{"medicamento": "Amoxicilina", "dosis": "500 mg", "frecuencia": "cada 8 horas", "duracion": "7 días", "indicaciones": "tomar con alimentos"}]
-
-EJEMPLO de 'alertas':
-[{"tipo": "alergia", "descripcion": "El paciente es alérgico a la penicilina; se evitó la amoxicilina.", "severidad": "Alta"}]"""
+*Nota: 'receta' y 'alertas' son siempre listas de objetos. Si no hay datos, devuelve una lista vacía [].*"""
 
     # --- 2. USER PROMPT (Los datos específicos de esta consulta) ---
-    registered_allergens_str = ", ".join([a.allergen for a in patient.allergies]) if patient.allergies else "Ninguna"
     allergies = [
         f"- {a.allergen} ({a.severity}): {a.reaction}"
         for a in patient.allergies
@@ -104,33 +95,33 @@ EJEMPLO de 'alertas':
         f"- {m.name} {m.dosage}, {m.frequency}"
         for m in patient.medications
     ]
+    lista_alergias_str = (
+        chr(10).join(allergies) if allergies else "Ninguna registrada"
+    )
+    lista_medicamentos_str = (
+        chr(10).join(medications) if medications else "Ninguno registrado"
+    )
 
-    user_prompt = f"""Analiza la siguiente consulta y estructura la información.
+    age = _calculate_age(patient.date_of_birth)
+    age_str = f"{age} años" if age is not None else "No registrada"
 
-FORMATO DE SALIDA EXACTO (JSON):
-{{
-  "soape": {{"subjetivo": "...", "objetivo": "...", "analisis": "...", "plan": "...", "evaluacion": "..."}},
-  "diagnosticos_sugeridos": [{{"codigo": "...", "descripcion": "...", "probabilidad": "..."}}],
-  "receta": [{{"medicamento": "...", "dosis": "...", "frecuencia": "...", "duracion": "...", "indicaciones": "..."}}],
-  "resumen_paciente": "...",
-  "alertas": [{{"tipo": "alergia|interaccion|clinica", "descripcion": "...", "severidad": "Alta|Media|Baja"}}]
-}}
+    user_prompt = f"""Analiza la siguiente consulta y extrae la información clínica requerida en el formato JSON establecido.
 
-Recuerda: 'receta' y 'alertas' son listas de OBJETOS (no de texto). Si no hay datos, usa []. Rellena con "" los campos que no apliquen.
-
-DATOS DEL PACIENTE:
+=== DATOS DEL PACIENTE ===
 - ID: {patient.id}
 - Nombre: {patient.first_name} {patient.last_name}
-- Fecha de nacimiento: {patient.date_of_birth}
+- Edad: {age_str}
 - Género: {patient.gender}
-- ALÉRGENOS REGISTRADOS: {chr(10).join(allergies) if allergies else "Ninguna registrada"}
-- Medicamentos actuales: {chr(10).join(medications) if medications else "Ninguno registrado"}
+- ALÉRGENOS REGISTRADOS: {lista_alergias_str}
+- MEDICAMENTOS ACTUALES: {lista_medicamentos_str}
 
-CONSULTA:
+=== DATOS DE LA CONSULTA ===
 - Signos vitales: {consultation.vital_signs}
 - Examen físico: {consultation.physical_exam}
-- Conversación: {consultation.conversation_text}
-"""
+- Conversación:
+{consultation.conversation_text}
+
+Procesa la información ahora:"""
     return system_prompt, user_prompt
 
 
@@ -161,65 +152,18 @@ def process_consultation(
     # 3-4. Obtener la respuesta de la IA según el proveedor seleccionado
     try:
         if provider == "gemini":
-            # --- Proveedor en la nube: Gemini ---
+            # --- Proveedor en la nube: Gemini + Function Calling (catálogo SQL) ---
             logger.info(
                 "Procesando con Gemini API (modelo: {model})",
                 model=GEMINI_MODEL_NAME,
             )
-            try:
-                model = genai.GenerativeModel(
-                    model_name=GEMINI_MODEL_NAME,
-                    system_instruction=system_prompt,
-                )
-                logger.debug(
-                    "Enviando prompt a Gemini con esquema estricto GeminiClinicalOutput"
-                )
-                response = model.generate_content(
-                    user_prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        response_mime_type="application/json",
-                        response_schema=GeminiClinicalOutput,
-                        temperature=0.0,
-                    ),
-                )
-
-                if not response.text:
-                    logger.error("Gemini devolvió una respuesta vacía.")
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Gemini devolvió una respuesta vacía.",
-                    )
-
-                logger.debug(
-                    "Texto crudo de Gemini recibido ({n} caracteres).",
-                    n=len(response.text),
-                )
-                try:
-                    result = json.loads(response.text)
-                except json.JSONDecodeError as json_exc:
-                    logger.error(
-                        "Error al parsear JSON de Gemini: {err}. Fragmento: {text}",
-                        err=json_exc,
-                        text=response.text[:500],
-                    )
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"La respuesta de Gemini no es un JSON válido: {json_exc}",
-                    ) from json_exc
-
-                logger.success(
-                    "Respuesta estructurada de Gemini recibida. Claves: {keys}",
-                    keys=list(result.keys()),
-                )
-
-            except HTTPException:
-                raise
-            except Exception as gemini_exc:
-                logger.exception("Error durante la llamada a Gemini API")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Error al procesar consulta con Gemini: {gemini_exc}",
-                ) from gemini_exc
+            result = run_gemini_clinical_pipeline(
+                model_name=GEMINI_MODEL_NAME,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                conversation_text=consultation.conversation_text,
+                physical_exam=consultation.physical_exam,
+            )
 
         elif provider == "ollama":
             # --- Proveedor local: Ollama ---

@@ -206,3 +206,18 @@ class Diagnostic(Base):
     probabilidad = Column(String, nullable=True)  # Ej: Alta, Media, Baja
 
     consultation = relationship("Consultation", back_populates="diagnostics")
+
+
+class MedicationCatalog(Base):
+    """Catálogo institucional de medicamentos disponibles (Capa 1 — SQL estructurado)."""
+
+    __tablename__ = "medications_catalog"
+
+    id = Column(Integer, primary_key=True, index=True)
+    producto = Column(String, nullable=False)
+    marca = Column(String, nullable=True)
+    sustancia_activa = Column(String, nullable=False, index=True)
+    categoria = Column(String, nullable=True, index=True)
+    ean = Column(String, nullable=True, index=True)
+    laboratorio = Column(String, nullable=True)
+    estatus = Column(String, default="ACTIVO", nullable=False, index=True)
