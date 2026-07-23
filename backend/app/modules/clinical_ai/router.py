@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Patient, Consultation, ClinicalNote, Doctor
 from app.db.session import get_db
+from app.services.icd11_service import enrich_diagnoses_with_icd11
 from . import crud
 from .gemini_pipeline import run_gemini_clinical_pipeline
 from .pdf_generator import generate_consultation_pdf
@@ -74,12 +75,15 @@ REGLAS DE RAZONAMIENTO CLÍNICO (SOAPE Y DIAGNÓSTICOS):
 - OBJETIVO: Basa esto en los 'Signos vitales' y 'Examen físico'. Si están vacíos o no se mencionan en la charla, usa estrictamente la frase: "Pendiente de exploración física completa". NUNCA lo dejes en blanco.
 - ANÁLISIS: Justifica brevemente por qué sugieres los diagnósticos basados en el Subjetivo y Objetivo.
 - PLAN: Define los pasos a seguir (laboratorios, tratamiento, reposo). Si no hay datos, infiere el siguiente paso lógico (ej. "Realizar exploración física y prescribir tratamiento sintomático").
-- DIAGNÓSTICOS: Usa diagnósticos sindromáticos con códigos CIE-10 reales. Si dudas del código, envíalo vacío "".
+- DIAGNÓSTICOS: Devuelve SOLO nombres clínicos en texto plano (ej. "Hipertensión esencial",
+  "Diabetes mellitus tipo 2", "Faringoamigdalitis aguda"). NUNCA inventes ni adivines códigos
+  CIE-10/CIE-11. El campo "codigo" debe ir SIEMPRE como cadena vacía ""; el backend lo
+  enriquecerá después con la API oficial de la OMS.
 
 ESTRUCTURA JSON OBLIGATORIA (Todas las claves deben existir):
 {
   "soape": {"subjetivo": "...", "objetivo": "...", "analisis": "...", "plan": "...", "evaluacion": "..."},
-  "diagnosticos_sugeridos": [{"codigo": "...", "descripcion": "...", "probabilidad": "Alta|Media|Baja"}],
+  "diagnosticos_sugeridos": [{"codigo": "", "descripcion": "Nombre del diagnóstico en texto plano", "probabilidad": "Alta|Media|Baja"}],
   "receta": [{"medicamento": "...", "dosis": "...", "frecuencia": "...", "duracion": "...", "indicaciones": "..."}],
   "resumen_paciente": "...",
   "alertas": [{"tipo": "alergia|interaccion|clinica", "descripcion": "...", "severidad": "Alta|Media|Baja"}]
@@ -126,7 +130,7 @@ Procesa la información ahora:"""
 
 
 @router.post("/process-consultation", response_model=AIClinicalOutput)
-def process_consultation(
+async def process_consultation(
     consultation: ConsultationInput,
     db: Session = Depends(get_db),
 ):
@@ -196,7 +200,7 @@ def process_consultation(
         # Asegurar que exista la lista de alertas
         if "alertas" not in result or result["alertas"] is None:
             result["alertas"] = []
-            
+
         # Validar si faltan los signos vitales
         if not consultation.vital_signs or consultation.vital_signs.strip() == "":
             result["alertas"].append(
@@ -213,6 +217,15 @@ def process_consultation(
         result.setdefault("receta", [])
         result.setdefault("resumen_paciente", "")
         # --- FIN DE VALIDACIÓN MANUAL ---
+
+        # 4b. Enriquecer diagnósticos con CIE-11 oficial (OMS) en paralelo
+        logger.info(
+            "Enriqueciendo {n} diagnóstico(s) con la API CIE-11 de la OMS.",
+            n=len(result.get("diagnosticos_sugeridos") or []),
+        )
+        result["diagnosticos_sugeridos"] = await enrich_diagnoses_with_icd11(
+            result.get("diagnosticos_sugeridos") or []
+        )
 
         # Validar la salida de la IA contra el esquema Pydantic original
         try:

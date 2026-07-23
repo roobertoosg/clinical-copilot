@@ -314,15 +314,15 @@ def generate_consultation_pdf(
         story.append(Paragraph("Sin nota clínica registrada.", styles["body"]))
     story.append(Spacer(1, 8))
 
-    # 4. Diagnósticos (código + descripción + probabilidad)
-    story.append(Paragraph("Diagnósticos", styles["section"]))
+    # 4. Diagnósticos (código CIE-11 + descripción + probabilidad)
+    story.append(Paragraph("Diagnósticos (CIE-11)", styles["section"]))
     dx_list = list(diagnostics or [])
     if dx_list:
         for dx in dx_list:
-            codigo = (getattr(dx, "codigo", None) or "").strip()
+            codigo = (getattr(dx, "codigo", None) or "").strip() or "[Sin Código]"
             desc = (getattr(dx, "description", None) or "").strip() or "—"
             prob = (getattr(dx, "probabilidad", None) or "").strip()
-            prefix = f"<b>[{codigo}]</b> " if codigo else "&bull; "
+            prefix = f"<b>[{codigo}]</b> "
             suffix = f" <font color='#64748b'>({prob})</font>" if prob else ""
             story.append(Paragraph(f"{prefix}{desc}{suffix}", styles["body"]))
     else:

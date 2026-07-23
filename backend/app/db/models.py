@@ -201,7 +201,7 @@ class Diagnostic(Base):
         nullable=False,
         index=True,
     )
-    codigo = Column(String, nullable=True)        # Código CIE-10 (ej. J02.9)
+    codigo = Column(String, nullable=True)        # Código CIE-11 OMS (ej. BA00) o "[Sin Código]"
     description = Column(String, nullable=False)  # Descripción del diagnóstico
     probabilidad = Column(String, nullable=True)  # Ej: Alta, Media, Baja
 
