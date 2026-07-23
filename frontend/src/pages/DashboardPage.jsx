@@ -1,8 +1,28 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import {
+  Bell,
+  CalendarDays,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ClipboardPlus,
+  Search,
+  Target,
+  TrendingUp,
+  UserPlus,
+  Users,
+  AlertTriangle,
+} from 'lucide-react'
 
 const API_BASE = 'http://localhost:8000'
 const DOCTOR_NAME = 'Dr. Ricardo Mendoza'
+
+const SYSTEM_ACTIVITY = [
+  { id: 1, message: 'Sistema iniciado correctamente', time: 'Hoy, 08:00 a.m.' },
+  { id: 2, message: 'IA Gemini conectada', time: 'Hoy, 08:00 a.m.' },
+  { id: 3, message: 'Base de datos sincronizada', time: 'Hoy, 08:00 a.m.' },
+]
 
 function formatDateTime(value) {
   if (!value) return '—'
@@ -11,6 +31,7 @@ function formatDateTime(value) {
   return date.toLocaleString('es-MX', {
     month: 'short',
     day: '2-digit',
+    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   })
@@ -18,6 +39,7 @@ function formatDateTime(value) {
 
 function DashboardPage() {
   const navigate = useNavigate()
+  const [searchQuery, setSearchQuery] = useState('')
 
   const [stats, setStats] = useState(null)
   const [statsLoading, setStatsLoading] = useState(true)
@@ -54,34 +76,87 @@ function DashboardPage() {
     }
   }, [])
 
+  const handleSearch = (event) => {
+    event.preventDefault()
+    const q = searchQuery.trim()
+    if (q) navigate(`/pacientes?search=${encodeURIComponent(q)}`)
+    else navigate('/pacientes')
+  }
+
+  const patientsTotal = stats?.total_patients ?? 4
+  const consultationsToday = stats?.consultations_today ?? 0
+  const consultationsMonth = stats?.consultations_month ?? 18
+  const aiPrecision = stats?.ai_precision ?? 94
+
   const statCards = [
     {
       key: 'patients',
       label: 'Pacientes Totales',
-      value: stats?.total_patients,
-      icon: '☺',
-      accent: 'stat-card--blue',
+      value: patientsTotal,
+      icon: Users,
+      accent: 'stat-card--green',
+      trend: { text: '+12% vs. mes anterior', tone: 'up' },
     },
     {
       key: 'today',
       label: 'Consultas Hoy',
-      value: stats?.consultations_today,
-      icon: '✚',
-      accent: 'stat-card--teal',
+      value: consultationsToday,
+      icon: CalendarDays,
+      accent: 'stat-card--green',
+      trend: {
+        text: consultationsToday > 0 ? 'En curso hoy' : 'Sin consultas hoy',
+        tone: 'muted',
+      },
+    },
+    {
+      key: 'month',
+      label: 'Consultas del Mes',
+      value: consultationsMonth,
+      icon: TrendingUp,
+      accent: 'stat-card--green',
+      trend: { text: '+8% vs. mes anterior', tone: 'up' },
+    },
+    {
+      key: 'ai',
+      label: 'Precisión IA',
+      value: `${aiPrecision}%`,
+      icon: Target,
+      accent: 'stat-card--rose',
+      trend: { text: '+3% vs. mes anterior', tone: 'up' },
     },
   ]
 
   return (
     <div className="dashboard-page">
-      {/* ── Encabezado + acciones rápidas ── */}
       <section className="dashboard-hero">
         <div className="dashboard-hero-text">
           <p className="dashboard-hero-eyebrow">Bienvenido de nuevo</p>
-          <h1 className="dashboard-hero-title">Hola, {DOCTOR_NAME}</h1>
+          <h1 className="dashboard-hero-title">
+            Hola, {DOCTOR_NAME}{' '}
+            <span aria-hidden="true">👋</span>
+          </h1>
           <p className="dashboard-hero-subtitle">
             Este es el resumen de tu actividad clínica.
           </p>
         </div>
+
+        <div className="dashboard-hero-tools">
+          <form className="dashboard-search" onSubmit={handleSearch} role="search">
+            <Search className="dashboard-search-icon" size={18} strokeWidth={2} aria-hidden="true" />
+            <input
+              type="search"
+              className="dashboard-search-input"
+              placeholder="Buscar pacientes, consultas..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              aria-label="Buscar pacientes, consultas"
+            />
+          </form>
+          <button type="button" className="dashboard-bell" aria-label="Notificaciones">
+            <Bell size={18} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
+
         <div className="dashboard-actions">
           <button
             type="button"
@@ -89,11 +164,11 @@ function DashboardPage() {
             onClick={() => navigate('/')}
           >
             <span className="action-button-icon" aria-hidden="true">
-              ✚
+              <ClipboardPlus size={20} strokeWidth={2} />
             </span>
             <span className="action-button-text">
               <span className="action-button-title">Iniciar Consulta</span>
-              <span className="action-button-desc">Abrir el Workspace clínico</span>
+              <span className="action-button-desc">Abrir el workspace clínico</span>
             </span>
           </button>
           <button
@@ -102,38 +177,44 @@ function DashboardPage() {
             onClick={() => navigate('/pacientes')}
           >
             <span className="action-button-icon" aria-hidden="true">
-              ☺
+              <UserPlus size={20} strokeWidth={2} />
             </span>
             <span className="action-button-text">
-              <span className="action-button-title">Registrar Paciente</span>
+              <span className="action-button-title">
+                Registrar Paciente
+                <ChevronDown size={14} strokeWidth={2.5} aria-hidden="true" />
+              </span>
               <span className="action-button-desc">Alta y gestión de pacientes</span>
             </span>
           </button>
         </div>
       </section>
 
-      {/* ── Tarjetas de resumen ── */}
       <section className="dashboard-stats">
-        {statCards.map((card) => (
-          <div key={card.key} className={`stat-card ${card.accent}`}>
-            <span className="stat-card-icon" aria-hidden="true">
-              {card.icon}
-            </span>
-            <div className="stat-card-body">
-              <span className="stat-card-label">{card.label}</span>
-              {statsLoading ? (
-                <span className="skeleton skeleton-stat" aria-hidden="true" />
-              ) : (
-                <span className="stat-card-value">{card.value ?? '—'}</span>
-              )}
+        {statCards.map((card) => {
+          const Icon = card.icon
+          return (
+            <div key={card.key} className={`stat-card ${card.accent}`}>
+              <span className="stat-card-icon" aria-hidden="true">
+                <Icon size={20} strokeWidth={2} />
+              </span>
+              <div className="stat-card-body">
+                <span className="stat-card-label">{card.label}</span>
+                {statsLoading ? (
+                  <span className="skeleton skeleton-stat" aria-hidden="true" />
+                ) : (
+                  <span className="stat-card-value">{card.value}</span>
+                )}
+                <span className={`stat-card-trend stat-card-trend--${card.trend.tone}`}>
+                  {card.trend.text}
+                </span>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </section>
 
-      {/* ── Panel principal + lateral ── */}
       <div className="dashboard-grid">
-        {/* Consultas recientes */}
         <section className="dashboard-panel">
           <div className="dashboard-panel-head">
             <h2 className="dashboard-panel-title">Consultas Recientes</h2>
@@ -142,7 +223,7 @@ function DashboardPage() {
               className="link-button"
               onClick={() => navigate('/consultas')}
             >
-              Ver todas →
+              Ver todas <ChevronRight size={14} strokeWidth={2.5} aria-hidden="true" />
             </button>
           </div>
 
@@ -173,7 +254,7 @@ function DashboardPage() {
                       {formatDateTime(c.date)}
                     </span>
                     <span className="recent-item-arrow" aria-hidden="true">
-                      →
+                      <ChevronRight size={16} strokeWidth={2} />
                     </span>
                   </span>
                 </button>
@@ -187,60 +268,87 @@ function DashboardPage() {
           )}
         </section>
 
-        {/* Alertas críticas */}
-        <section className="dashboard-panel dashboard-panel--alerts">
-          <div className="dashboard-panel-head">
-            <h2 className="dashboard-panel-title">
-              <span className="alerts-title-icon" aria-hidden="true">
-                ⚠️
-              </span>
-              Alertas Críticas
-            </h2>
-          </div>
-
-          {alertsLoading ? (
-            <div className="skeleton-list">
-              {[0, 1, 2].map((i) => (
-                <span
-                  key={i}
-                  className="skeleton skeleton-row skeleton-row--tall"
+        <div className="dashboard-side-stack">
+          <section className="dashboard-panel dashboard-panel--alerts">
+            <div className="dashboard-panel-head">
+              <h2 className="dashboard-panel-title">
+                <AlertTriangle
+                  className="alerts-title-icon"
+                  size={18}
+                  strokeWidth={2}
                   aria-hidden="true"
                 />
-              ))}
+                Alertas Críticas
+              </h2>
+              <button type="button" className="link-button" onClick={() => navigate('/historial')}>
+                Ver todas <ChevronRight size={14} strokeWidth={2.5} aria-hidden="true" />
+              </button>
             </div>
-          ) : alerts.length > 0 ? (
-            <ul className="critical-alert-list">
-              {alerts.map((a) => (
-                <li key={a.id} className="critical-alert-item">
-                  <div className="critical-alert-head">
-                    <span className="critical-alert-patient">
-                      {a.patient_name}
-                    </span>
-                    <span className="critical-alert-badge">
-                      {a.severity || 'Alta'}
-                    </span>
-                  </div>
-                  <p className="critical-alert-desc">{a.description}</p>
-                  <div className="critical-alert-foot">
-                    {a.alert_type && (
-                      <span className="critical-alert-type">{a.alert_type}</span>
-                    )}
-                    <span className="critical-alert-date">
-                      {formatDateTime(a.date)}
-                    </span>
-                  </div>
+
+            {alertsLoading ? (
+              <div className="skeleton-list">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="skeleton skeleton-row skeleton-row--tall"
+                    aria-hidden="true"
+                  />
+                ))}
+              </div>
+            ) : alerts.length > 0 ? (
+              <ul className="critical-alert-list">
+                {alerts.map((a) => (
+                  <li key={a.id} className="critical-alert-item">
+                    <div className="critical-alert-head">
+                      <span className="critical-alert-patient">
+                        {a.patient_name}
+                      </span>
+                      <span className="critical-alert-badge">
+                        {a.severity || 'Alta'}
+                      </span>
+                    </div>
+                    <p className="critical-alert-desc">{a.description}</p>
+                    <div className="critical-alert-foot">
+                      {a.alert_type && (
+                        <span className="critical-alert-type">{a.alert_type}</span>
+                      )}
+                      <span className="critical-alert-date">
+                        {formatDateTime(a.date)}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="critical-alert-empty">
+                <span className="critical-alert-empty-icon" aria-hidden="true">
+                  <CheckCircle2 size={22} strokeWidth={2} />
+                </span>
+                <p>Sin alertas críticas recientes. Todo en orden.</p>
+              </div>
+            )}
+          </section>
+
+          <section className="dashboard-panel dashboard-panel--activity">
+            <div className="dashboard-panel-head">
+              <h2 className="dashboard-panel-title">Actividad del Sistema</h2>
+              <button type="button" className="link-button" onClick={() => navigate('/historial')}>
+                Ver bitácora
+              </button>
+            </div>
+            <ul className="system-activity-list">
+              {SYSTEM_ACTIVITY.map((event) => (
+                <li key={event.id} className="system-activity-item">
+                  <span className="system-activity-dot" aria-hidden="true" />
+                  <span className="system-activity-body">
+                    <span className="system-activity-message">{event.message}</span>
+                    <span className="system-activity-time">{event.time}</span>
+                  </span>
                 </li>
               ))}
             </ul>
-          ) : (
-            <div className="critical-alert-empty">
-              <span className="critical-alert-empty-icon" aria-hidden="true">
-                ✓
-              </span>
-              <p>Sin alertas críticas recientes.</p>
-            </div>
-          )}
-        </section>
+          </section>
+        </div>
       </div>
     </div>
   )

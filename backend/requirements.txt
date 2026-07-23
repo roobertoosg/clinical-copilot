@@ -13,6 +13,7 @@ idna==3.18
 loguru==0.7.3
 pillow==12.3.0
 psycopg2-binary==2.9.12
+pymupdf==1.28.0
 pydantic==2.13.4
 pydantic_core==2.46.4
 python-dotenv==1.2.2
