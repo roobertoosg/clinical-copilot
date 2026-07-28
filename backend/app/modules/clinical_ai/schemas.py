@@ -50,6 +50,8 @@ class AIClinicalOutput(BaseModel):
     # Folio de la consulta ya persistida (lo rellena el router tras guardar);
     # permite al frontend exportar el PDF inmediatamente desde el Workspace.
     folio: Optional[str] = None
+    # Similitud SOAPE IA vs. médico (0.0–1.0); se rellena en finalize-consultation
+    ai_accuracy_score: Optional[float] = None
 
     @field_validator("receta", mode="before")
     @classmethod
@@ -78,6 +80,25 @@ class AIClinicalOutput(BaseModel):
             else:
                 coerced.append(item)
         return coerced
+
+
+class FinalizeConsultationRequest(BaseModel):
+    """Payload Human-in-the-Loop: borrador IA + versión editada por el médico."""
+
+    patient_id: int
+    conversation_text: str = ""
+    vital_signs: str = "No registrados"
+    physical_exam: str = "No registrado"
+    ai_original_data: AIClinicalOutput
+    doctor_final_data: AIClinicalOutput
+
+
+class FinalizeConsultationResponse(BaseModel):
+    """Respuesta tras persistir la consulta final del médico."""
+
+    folio: str
+    ai_accuracy_score: float
+    consultation: AIClinicalOutput
 
 
 # ── Esquemas estrictos para Gemini (sin defaults) ──────────────

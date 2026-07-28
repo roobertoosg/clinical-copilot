@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 from datetime import date
+from difflib import SequenceMatcher
 
 import google.generativeai as genai
 import requests
@@ -14,6 +15,12 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Patient, Consultation, ClinicalNote, Doctor
 from app.db.session import get_db
+from app.modules.clinical_rag.doctor_feedback import (
+    build_doctor_style_prompt_block,
+    build_patient_symptoms_text,
+    retrieve_doctor_style_examples,
+    store_doctor_feedback,
+)
 from app.services.icd11_service import enrich_diagnoses_with_icd11
 from . import crud
 from .gemini_pipeline import run_gemini_clinical_pipeline
@@ -23,6 +30,8 @@ from .schemas import (
     ConsultationInput,
     ConsultationListItem,
     ConsultationDetail,
+    FinalizeConsultationRequest,
+    FinalizeConsultationResponse,
 )
 
 load_dotenv()
@@ -60,7 +69,12 @@ def _calculate_age(date_of_birth: date | None) -> int | None:
     )
 
 
-def _build_prompts(patient: Patient, consultation: ConsultationInput) -> tuple[str, str]:
+def _build_prompts(
+    patient: Patient,
+    consultation: ConsultationInput,
+    *,
+    doctor_style_guide: str = "",
+) -> tuple[str, str]:
     # --- 1. SYSTEM PROMPT (La personalidad y reglas) ---
     system_prompt = """Eres 'Aura Clinical Copilot', un asistente médico inteligente y estricto de grado clínico.
 
@@ -75,10 +89,14 @@ REGLAS DE RAZONAMIENTO CLÍNICO (SOAPE Y DIAGNÓSTICOS):
 - OBJETIVO: Basa esto en los 'Signos vitales' y 'Examen físico'. Si están vacíos o no se mencionan en la charla, usa estrictamente la frase: "Pendiente de exploración física completa". NUNCA lo dejes en blanco.
 - ANÁLISIS: Justifica brevemente por qué sugieres los diagnósticos basados en el Subjetivo y Objetivo.
 - PLAN: Define los pasos a seguir (laboratorios, tratamiento, reposo). Si no hay datos, infiere el siguiente paso lógico (ej. "Realizar exploración física y prescribir tratamiento sintomático").
-- DIAGNÓSTICOS: Devuelve SOLO nombres clínicos en texto plano (ej. "Hipertensión esencial",
-  "Diabetes mellitus tipo 2", "Faringoamigdalitis aguda"). NUNCA inventes ni adivines códigos
+- DIAGNÓSTICOS: Devuelve SOLO nombres clínicos en texto plano. NUNCA inventes ni adivines códigos
   CIE-10/CIE-11. El campo "codigo" debe ir SIEMPRE como cadena vacía ""; el backend lo
   enriquecerá después con la API oficial de la OMS.
+  IMPORTANTE para CIE-11: Extrae diagnósticos utilizando EXCLUSIVAMENTE términos médicos atómicos
+  y estandarizados. NUNCA uses términos compuestos (ej. usa 'Faringitis' y 'Amigdalitis' por
+  separado, NUNCA 'Faringoamigdalitis'). Omite modificadores temporales o de severidad en el
+  nombre principal (ej. extrae 'Rinofaringitis' en lugar de 'Rinofaringitis aguda') para
+  maximizar la coincidencia exacta en bases de datos.
 
 ESTRUCTURA JSON OBLIGATORIA (Todas las claves deben existir):
 {
@@ -89,6 +107,10 @@ ESTRUCTURA JSON OBLIGATORIA (Todas las claves deben existir):
   "alertas": [{"tipo": "alergia|interaccion|clinica", "descripcion": "...", "severidad": "Alta|Media|Baja"}]
 }
 *Nota: 'receta' y 'alertas' son siempre listas de objetos. Si no hay datos, devuelve una lista vacía [].*"""
+
+    style_block = (doctor_style_guide or "").strip()
+    if style_block:
+        system_prompt = f"{system_prompt.strip()}\n\n{style_block}"
 
     # --- 2. USER PROMPT (Los datos específicos de esta consulta) ---
     allergies = [
@@ -129,17 +151,281 @@ Procesa la información ahora:"""
     return system_prompt, user_prompt
 
 
+def _soape_to_comparable_text(soape: dict | None) -> str:
+    """Aplana el SOAPE a un texto comparable (orden de claves estable)."""
+    if not isinstance(soape, dict):
+        return ""
+    keys = ("subjetivo", "objetivo", "analisis", "plan", "evaluacion")
+    parts: list[str] = []
+    for key in keys:
+        value = soape.get(key)
+        text = "" if value is None else str(value).strip()
+        parts.append(f"{key}:{text}")
+    return "\n".join(parts)
+
+
+def calculate_soape_similarity(
+    ai_soape: dict | None,
+    doctor_soape: dict | None,
+) -> float:
+    """Calcula similitud (0.0–1.0) entre SOAPE de la IA y del médico.
+
+    Usa ``difflib.SequenceMatcher.ratio()`` sobre el texto aplanado del SOAPE.
+    """
+    original = _soape_to_comparable_text(ai_soape)
+    final = _soape_to_comparable_text(doctor_soape)
+    if not original and not final:
+        return 1.0
+    return float(SequenceMatcher(None, original, final).ratio())
+
+
+async def _generate_clinical_draft(
+    patient: Patient,
+    consultation: ConsultationInput,
+) -> AIClinicalOutput:
+    """Ejecuta el pipeline IA + CIE-11 y retorna el borrador sin persistir."""
+    # Feedback Loop: recupera estilo del médico desde Qdrant (embeddings locales)
+    symptoms_text = build_patient_symptoms_text(
+        conversation_text=consultation.conversation_text,
+        vital_signs=consultation.vital_signs,
+        physical_exam=consultation.physical_exam,
+    )
+    style_examples = retrieve_doctor_style_examples(symptoms_text, top_k=2)
+    style_guide = build_doctor_style_prompt_block(style_examples)
+    if style_guide:
+        logger.info(
+            "Feedback Loop — inyectando {n} ejemplo(s) de estilo en el System Prompt.",
+            n=len(style_examples),
+        )
+
+    system_prompt, user_prompt = _build_prompts(
+        patient,
+        consultation,
+        doctor_style_guide=style_guide,
+    )
+    provider = (consultation.ai_provider or "gemini").strip().lower()
+
+    if provider == "gemini":
+        logger.info(
+            "Procesando con Gemini API (modelo: {model})",
+            model=GEMINI_MODEL_NAME,
+        )
+        result = run_gemini_clinical_pipeline(
+            model_name=GEMINI_MODEL_NAME,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            conversation_text=consultation.conversation_text,
+            physical_exam=consultation.physical_exam,
+        )
+
+    elif provider == "ollama":
+        logger.info("Procesando con modelo local Ollama")
+        payload = {
+            "model": "llama3.1",
+            "system": system_prompt,
+            "prompt": user_prompt,
+            "format": "json",
+            "stream": False,
+            "options": {"temperature": 0.0},
+        }
+        logger.debug(
+            "Enviando prompts al modelo local de Ollama ({model}) en {url}.",
+            model=payload["model"],
+            url=OLLAMA_URL,
+        )
+        response = requests.post(OLLAMA_URL, json=payload)
+        response.raise_for_status()
+        respuesta_texto = response.json().get("response", "{}")
+        result = json.loads(respuesta_texto)
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Proveedor de IA no soportado: {consultation.ai_provider}",
+        )
+
+    if "alertas" not in result or result["alertas"] is None:
+        result["alertas"] = []
+
+    if not consultation.vital_signs or consultation.vital_signs.strip() == "":
+        result["alertas"].append(
+            {
+                "tipo": "clinica",
+                "descripcion": (
+                    "No se registraron signos vitales en el formulario. "
+                    "Es un requerimiento clínico indispensable."
+                ),
+                "severidad": "Alta",
+            }
+        )
+
+    result.setdefault("soape", {})
+    result.setdefault("diagnosticos_sugeridos", [])
+    result.setdefault("receta", [])
+    result.setdefault("resumen_paciente", "")
+
+    logger.info(
+        "Enriqueciendo {n} diagnóstico(s) con la API CIE-11 de la OMS.",
+        n=len(result.get("diagnosticos_sugeridos") or []),
+    )
+    result["diagnosticos_sugeridos"] = await enrich_diagnoses_with_icd11(
+        result.get("diagnosticos_sugeridos") or []
+    )
+
+    try:
+        return AIClinicalOutput(**result)
+    except Exception as validation_exc:
+        logger.error(
+            "Error al mapear la respuesta de {provider} a AIClinicalOutput: {err}",
+            provider=provider,
+            err=validation_exc,
+        )
+        logger.debug("Payload recibido para validación: {payload}", payload=result)
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "La respuesta de la IA no cumple el esquema esperado: "
+                f"{validation_exc}"
+            ),
+        ) from validation_exc
+
+
+@router.post("/generate-draft", response_model=AIClinicalOutput)
+async def generate_draft(
+    consultation: ConsultationInput,
+    db: Session = Depends(get_db),
+):
+    """Genera el borrador clínico (IA + CIE-11) sin guardar ni emitir PDF.
+
+    Human-in-the-Loop — Paso 1: el médico revisa/edita este JSON en el frontend.
+    """
+    logger.info(
+        "Generando borrador clínico para paciente ID: {id}",
+        id=consultation.patient_id,
+    )
+
+    patient = db.query(Patient).filter(Patient.id == consultation.patient_id).first()
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Paciente no encontrado")
+
+    try:
+        draft = await _generate_clinical_draft(patient, consultation)
+        logger.success(
+            "Borrador clínico listo para revisión humana (paciente ID: {id}).",
+            id=patient.id,
+        )
+        return draft
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Error al generar borrador clínico: {err}", err=exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al generar borrador clínico: {exc}",
+        ) from exc
+
+
+@router.post("/finalize-consultation", response_model=FinalizeConsultationResponse)
+def finalize_consultation(
+    payload: FinalizeConsultationRequest,
+    db: Session = Depends(get_db),
+):
+    """Persiste la versión final del médico, calcula precisión IA y habilita PDF.
+
+    Human-in-the-Loop — Paso 2: compara SOAPE original vs. editado, guarda en
+    PostgreSQL y deja listo el folio para ``GET .../export-pdf``.
+    """
+    logger.info(
+        "Finalizando consulta Human-in-the-Loop para paciente ID: {id}",
+        id=payload.patient_id,
+    )
+
+    patient = db.query(Patient).filter(Patient.id == payload.patient_id).first()
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Paciente no encontrado")
+
+    accuracy = calculate_soape_similarity(
+        payload.ai_original_data.soape,
+        payload.doctor_final_data.soape,
+    )
+    logger.info(
+        "Precisión IA (similitud SOAPE): {score:.4f}",
+        score=accuracy,
+    )
+
+    input_data = ConsultationInput(
+        patient_id=payload.patient_id,
+        conversation_text=payload.conversation_text,
+        vital_signs=payload.vital_signs,
+        physical_exam=payload.physical_exam,
+    )
+
+    try:
+        saved = crud.save_consultation_results(
+            db=db,
+            patient_id=patient.id,
+            input_data=input_data,
+            ai_output=payload.doctor_final_data,
+            ai_accuracy_score=accuracy,
+        )
+    except Exception as db_exc:
+        logger.error(
+            "Error al guardar la consulta finalizada: {err}",
+            err=db_exc,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al guardar la consulta en la base de datos: {db_exc}",
+        ) from db_exc
+
+    # Feedback Loop: si accuracy < 0.95, indexar corrección con embeddings locales
+    if accuracy < 0.95:
+        symptoms_text = build_patient_symptoms_text(
+            conversation_text=payload.conversation_text,
+            vital_signs=payload.vital_signs,
+            physical_exam=payload.physical_exam,
+        )
+        store_doctor_feedback(
+            patient_symptoms=symptoms_text,
+            ai_soape=payload.ai_original_data.soape,
+            doctor_soape=payload.doctor_final_data.soape,
+            accuracy_score=accuracy,
+            patient_id=payload.patient_id,
+            folio=saved.folio,
+        )
+
+    final_output = payload.doctor_final_data.model_copy(deep=True)
+    final_output.folio = saved.folio
+    final_output.ai_accuracy_score = accuracy
+
+    logger.success(
+        "Consulta {folio} finalizada. ai_accuracy_score={score:.4f}",
+        folio=saved.folio,
+        score=accuracy,
+    )
+
+    return FinalizeConsultationResponse(
+        folio=saved.folio or "",
+        ai_accuracy_score=accuracy,
+        consultation=final_output,
+    )
+
+
 @router.post("/process-consultation", response_model=AIClinicalOutput)
 async def process_consultation(
     consultation: ConsultationInput,
     db: Session = Depends(get_db),
 ):
+    """Compatibilidad: genera borrador + persiste en un solo paso.
+
+    Preferir el flujo Human-in-the-Loop:
+    ``/generate-draft`` → revisión médica → ``/finalize-consultation``.
+    """
     logger.info(
-        "Iniciando procesamiento de consulta para paciente ID: {id}",
+        "Iniciando procesamiento de consulta (legacy) para paciente ID: {id}",
         id=consultation.patient_id,
     )
 
-    # 1. Buscar paciente
     patient = db.query(Patient).filter(Patient.id == consultation.patient_id).first()
     if patient is None:
         logger.error(
@@ -148,113 +434,20 @@ async def process_consultation(
         )
         raise HTTPException(status_code=404, detail="Paciente no encontrado")
 
-    # 2. Construir los prompts (compartidos por ambos proveedores)
-    system_prompt, user_prompt = _build_prompts(patient, consultation)
-
-    provider = (consultation.ai_provider or "gemini").strip().lower()
-
-    # 3-4. Obtener la respuesta de la IA según el proveedor seleccionado
     try:
-        if provider == "gemini":
-            # --- Proveedor en la nube: Gemini + Function Calling (catálogo SQL) ---
-            logger.info(
-                "Procesando con Gemini API (modelo: {model})",
-                model=GEMINI_MODEL_NAME,
-            )
-            result = run_gemini_clinical_pipeline(
-                model_name=GEMINI_MODEL_NAME,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                conversation_text=consultation.conversation_text,
-                physical_exam=consultation.physical_exam,
-            )
-
-        elif provider == "ollama":
-            # --- Proveedor local: Ollama ---
-            logger.info("Procesando con modelo local Ollama")
-            payload = {
-                "model": "llama3.1",
-                "system": system_prompt,
-                "prompt": user_prompt,
-                "format": "json",
-                "stream": False,
-                "options": {"temperature": 0.0},
-            }
-            logger.debug(
-                "Enviando prompts al modelo local de Ollama ({model}) en {url}.",
-                model=payload["model"],
-                url=OLLAMA_URL,
-            )
-            response = requests.post(OLLAMA_URL, json=payload)
-            response.raise_for_status()
-            respuesta_texto = response.json().get("response", "{}")
-            result = json.loads(respuesta_texto)
-
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Proveedor de IA no soportado: {consultation.ai_provider}",
-            )
-
-        # --- INICIO DE VALIDACIÓN MANUAL (PYTHON), común a ambos proveedores ---
-        # Asegurar que exista la lista de alertas
-        if "alertas" not in result or result["alertas"] is None:
-            result["alertas"] = []
-
-        # Validar si faltan los signos vitales
-        if not consultation.vital_signs or consultation.vital_signs.strip() == "":
-            result["alertas"].append(
-                {
-                    "tipo": "clinica",
-                    "descripcion": "No se registraron signos vitales en el formulario. Es un requerimiento clínico indispensable.",
-                    "severidad": "Alta",
-                }
-            )
-
-        # Asegurar que existan las claves requeridas por el esquema de salida
-        result.setdefault("soape", {})
-        result.setdefault("diagnosticos_sugeridos", [])
-        result.setdefault("receta", [])
-        result.setdefault("resumen_paciente", "")
-        # --- FIN DE VALIDACIÓN MANUAL ---
-
-        # 4b. Enriquecer diagnósticos con CIE-11 oficial (OMS) en paralelo
-        logger.info(
-            "Enriqueciendo {n} diagnóstico(s) con la API CIE-11 de la OMS.",
-            n=len(result.get("diagnosticos_sugeridos") or []),
-        )
-        result["diagnosticos_sugeridos"] = await enrich_diagnoses_with_icd11(
-            result.get("diagnosticos_sugeridos") or []
-        )
-
-        # Validar la salida de la IA contra el esquema Pydantic original
-        try:
-            ai_output = AIClinicalOutput(**result)
-        except Exception as validation_exc:
-            logger.error(
-                "Error al mapear la respuesta de {provider} a AIClinicalOutput: {err}",
-                provider=provider,
-                err=validation_exc,
-            )
-            logger.debug("Payload recibido para validación: {payload}", payload=result)
-            raise HTTPException(
-                status_code=500,
-                detail=f"La respuesta de la IA no cumple el esquema esperado: {validation_exc}",
-            ) from validation_exc
-
+        ai_output = await _generate_clinical_draft(patient, consultation)
         logger.success(
-            "La IA devolvió una respuesta estructurada válida para el paciente ID: {id} (proveedor: {provider}).",
+            "La IA devolvió una respuesta estructurada válida para el paciente ID: {id}.",
             id=patient.id,
-            provider=provider,
         )
 
-        # 5. Persistir los resultados en PostgreSQL (transacción segura)
         try:
             saved = crud.save_consultation_results(
                 db=db,
                 patient_id=patient.id,
                 input_data=consultation,
                 ai_output=ai_output,
+                ai_accuracy_score=None,
             )
         except Exception as db_exc:
             logger.error(
@@ -266,11 +459,7 @@ async def process_consultation(
                 detail=f"Error al guardar la consulta en la base de datos: {db_exc}",
             ) from db_exc
 
-        # 6. Adjuntar el folio recién generado para que el frontend pueda
-        #    exportar el PDF directamente desde el Workspace.
         ai_output.folio = saved.folio
-
-        # 7. Devolver el mismo JSON al frontend, ya persistido
         return ai_output
 
     except HTTPException:

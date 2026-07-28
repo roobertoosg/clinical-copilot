@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Column, Integer, String, Date, DateTime, Text, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Date, DateTime, Text, Boolean, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from .session import Base
 
@@ -102,6 +102,8 @@ class Consultation(Base):
     reason = Column(Text, nullable=True)          # Motivo de la consulta / resumen
     transcription = Column(Text, nullable=True)   # Transcripción de la conversación
     status = Column(String, default="completed", nullable=False)
+    # Similitud SOAPE IA vs. versión final del médico (0.0–1.0), Human-in-the-Loop
+    ai_accuracy_score = Column(Float, nullable=True)
 
     patient = relationship("Patient", back_populates="consultations")
     doctor = relationship("Doctor", back_populates="consultations")

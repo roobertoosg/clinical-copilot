@@ -30,6 +30,37 @@ API_VERSION = "v2"
 # Renovar el token unos segundos antes de que expire
 _TOKEN_EXPIRY_SKEW_SECONDS = 60
 
+# Adjetivos / modificadores que suelen impedir match exacto en CIE-11
+_DIAGNOSIS_NOISE_WORDS: tuple[str, ...] = (
+    "aguda",
+    "agudo",
+    "crónica",
+    "cronica",
+    "crónico",
+    "cronico",
+    "leve",
+    "moderada",
+    "moderado",
+    "severa",
+    "severo",
+    "grave",
+    "inespecífica",
+    "inespecifica",
+    "inespecífico",
+    "inespecifico",
+    "sin especificación",
+    "sin especificacion",
+    "no especificada",
+    "no especificado",
+)
+
+_NOISE_PATTERN = re.compile(
+    r"\b(?:"
+    + "|".join(re.escape(w) for w in sorted(_DIAGNOSIS_NOISE_WORDS, key=len, reverse=True))
+    + r")\b",
+    flags=re.IGNORECASE,
+)
+
 
 def _env_credential(name: str) -> str:
     """Lee una credencial del entorno y limpia espacios/comillas residuales."""
@@ -73,8 +104,24 @@ class ICD11Client:
                 "en {path}",
                 path=_BACKEND_DIR / ".env",
             )
+
     def _credentials_configured(self) -> bool:
         return bool(self._client_id and self._client_secret)
+
+    @staticmethod
+    def _clean_diagnosis_query(query: str) -> str:
+        """Elimina adjetivos/modificadores comunes que reducen el match CIE-11.
+
+        Ejemplos:
+            ``"Rinofaringitis aguda"`` → ``"Rinofaringitis"``
+            ``"Faringitis crónica leve"`` → ``"Faringitis"``
+        """
+        text = (query or "").strip()
+        if not text:
+            return ""
+        text = _NOISE_PATTERN.sub(" ", text)
+        text = re.sub(r"[,\s/;|-]+", " ", text)
+        return text.strip(" .,-;:")
 
     async def _fetch_access_token(self) -> str:
         """Solicita un Bearer token vía OAuth 2.0 client_credentials.
@@ -133,8 +180,34 @@ class ICD11Client:
             return self._access_token
         return await self._fetch_access_token()
 
+    async def _request_search(
+        self,
+        query: str,
+        *,
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        """Ejecuta una petición GET de búsqueda MMS y normaliza la respuesta."""
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.get(
+                SEARCH_URL,
+                params={"q": query},
+                headers=headers,
+            )
+            response.raise_for_status()
+            data: dict[str, Any] = response.json()
+
+        entities = data.get("destinationEntities")
+        if not isinstance(entities, list):
+            data["destinationEntities"] = []
+        return data
+
     async def search_diagnosis(self, query: str) -> dict[str, Any]:
         """Busca diagnósticos en la linealización MMS del CIE-11 (API v2).
+
+        Flujo resiliente:
+        1. Petición con el query original.
+        2. Si no hay ``destinationEntities``, limpia adjetivos y reintenta.
+        3. Si aún falla, retorna estructura vacía / error controlado.
 
         Args:
             query: Texto clínico a buscar (español o inglés).
@@ -144,8 +217,8 @@ class ICD11Client:
             Si la petición falla o la query está vacía, retorna
             ``{"destinationEntities": [], "error": "..."}``.
         """
-        cleaned = (query or "").strip()
-        if not cleaned:
+        original = (query or "").strip()
+        if not original:
             return {
                 "destinationEntities": [],
                 "error": "La query de búsqueda está vacía.",
@@ -169,32 +242,50 @@ class ICD11Client:
                 "Accept-Language": "es",
             }
 
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.get(
-                    SEARCH_URL,
-                    params={"q": cleaned},
-                    headers=headers,
-                )
-                response.raise_for_status()
-                data: dict[str, Any] = response.json()
-
-            entities = data.get("destinationEntities")
-            if not isinstance(entities, list):
-                data["destinationEntities"] = []
-
+            # 1) Intento original
+            data = await self._request_search(original, headers=headers)
+            hits = data.get("destinationEntities") or []
             logger.info(
                 "ICD-11 — búsqueda '{q}' → {n} resultado(s).",
-                q=cleaned[:80],
-                n=len(data.get("destinationEntities") or []),
+                q=original[:80],
+                n=len(hits),
             )
-            return data
+            if hits:
+                return data
+
+            # 2) Reintento con query limpia (sin adjetivos/modificadores)
+            simplified = self._clean_diagnosis_query(original)
+            if simplified and simplified.casefold() != original.casefold():
+                logger.info(
+                    "ICD-11 — sin match; reintento con query limpia '{q}'.",
+                    q=simplified[:80],
+                )
+                data = await self._request_search(simplified, headers=headers)
+                hits = data.get("destinationEntities") or []
+                logger.info(
+                    "ICD-11 — reintento '{q}' → {n} resultado(s).",
+                    q=simplified[:80],
+                    n=len(hits),
+                )
+                if hits:
+                    data["queryUsed"] = simplified
+                    data["retried"] = True
+                    return data
+
+            # 3) Fallback controlado
+            return {
+                "destinationEntities": [],
+                "error": f"Sin resultados CIE-11 para '{original}'.",
+                "queryTried": original,
+                "queryCleaned": simplified or original,
+            }
 
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code if exc.response is not None else "?"
             logger.error(
                 "ICD-11 — error HTTP {status} en búsqueda '{q}': {err}",
                 status=status,
-                q=cleaned[:80],
+                q=original[:80],
                 err=exc,
             )
             return {
@@ -204,7 +295,7 @@ class ICD11Client:
         except httpx.RequestError as exc:
             logger.error(
                 "ICD-11 — error de red en búsqueda '{q}': {err}",
-                q=cleaned[:80],
+                q=original[:80],
                 err=exc,
             )
             return {

@@ -34,12 +34,16 @@ def save_consultation_results(
     patient_id: int,
     input_data: ConsultationInput,
     ai_output: AIClinicalOutput,
+    ai_accuracy_score: float | None = None,
 ) -> Consultation:
     """Persiste el resultado de una consulta clínica en una única transacción.
 
     Crea la Consultation y sus registros asociados (ClinicalNote, Prescription,
     ClinicalAlert). Si algo falla se hace rollback completo para no dejar datos
     parciales en la base de datos.
+
+    Args:
+        ai_accuracy_score: Similitud SOAPE IA vs. médico (0.0–1.0), opcional.
     """
     logger.info(
         "Iniciando persistencia clínica en la base de datos para paciente ID: {id}.",
@@ -56,6 +60,7 @@ def save_consultation_results(
             reason=ai_output.resumen_paciente,
             transcription=input_data.conversation_text,
             status="completed",
+            ai_accuracy_score=ai_accuracy_score,
         )
         db.add(consultation)
         # Flush para obtener el consultation.id sin cerrar la transacción

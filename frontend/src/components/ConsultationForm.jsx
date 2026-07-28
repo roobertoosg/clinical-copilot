@@ -521,7 +521,7 @@ function ConsultationForm({ onProcess, loading, onPatientLookup }) {
         className="process-button"
         disabled={loading || !patientId}
       >
-        {loading ? 'Procesando…' : 'Procesar con IA'}
+        {loading ? 'Generando borrador…' : 'Generar borrador con IA'}
       </button>
     </form>
   )

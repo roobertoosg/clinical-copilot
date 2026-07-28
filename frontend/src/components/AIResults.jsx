@@ -1,36 +1,34 @@
-import { useState } from 'react'
 import ClinicalCards from './ClinicalCards'
-import { downloadConsultationPdf } from '../utils/exportPdf'
+import ClinicalReviewEditor from './ClinicalReviewEditor'
 
-function AIResults({ aiResponse, loading }) {
-  const [exporting, setExporting] = useState(false)
-  const folio = aiResponse?.folio
-
-  const handleExport = async () => {
-    setExporting(true)
-    try {
-      await downloadConsultationPdf(folio)
-    } catch (error) {
-      alert(`No se pudo exportar el PDF: ${error.message}`)
-    } finally {
-      setExporting(false)
-    }
-  }
+function AIResults({
+  step = 'capture',
+  loading = false,
+  finalizing = false,
+  doctorFinalData = null,
+  completedData = null,
+  accuracyScore = null,
+  onDoctorDataChange,
+  onFinalize,
+}) {
+  const showEmpty = step === 'capture' && !loading && !doctorFinalData
+  const folio = completedData?.folio
 
   return (
     <div className="ai-results">
       <div className="column-header">
         <span className="column-header-accent" aria-hidden="true" />
-        <h2 className="section-title">Resultados de IA</h2>
-        {!loading && folio && (
-          <button
-            type="button"
-            className="secondary-button secondary-button--sm export-pdf-button"
-            onClick={handleExport}
-            disabled={exporting}
-          >
-            {exporting ? 'Generando…' : '⭳ Exportar PDF'}
-          </button>
+        <h2 className="section-title">
+          {step === 'review'
+            ? 'Revisión médica'
+            : step === 'completed'
+              ? 'Consulta finalizada'
+              : 'Resultados de IA'}
+        </h2>
+        {step === 'completed' && folio && (
+          <span className="review-folio-badge" title="Folio persistido">
+            {folio}
+          </span>
         )}
       </div>
 
@@ -38,18 +36,37 @@ function AIResults({ aiResponse, loading }) {
         {loading && (
           <div className="loading-message">
             <span className="loading-spinner" aria-hidden="true" />
-            <p>La IA está analizando el caso clínico...</p>
+            <p>La IA está generando el borrador clínico...</p>
           </div>
         )}
 
-        {!loading && aiResponse && <ClinicalCards data={aiResponse} />}
+        {!loading && step === 'review' && doctorFinalData && (
+          <ClinicalReviewEditor
+            data={doctorFinalData}
+            onChange={onDoctorDataChange}
+            onFinalize={onFinalize}
+            finalizing={finalizing}
+          />
+        )}
 
-        {!loading && !aiResponse && (
+        {!loading && step === 'completed' && completedData && (
+          <>
+            {typeof accuracyScore === 'number' && (
+              <div className="accuracy-banner">
+                Precisión IA (similitud SOAPE):{' '}
+                <strong>{(accuracyScore * 100).toFixed(1)}%</strong>
+              </div>
+            )}
+            <ClinicalCards data={completedData} />
+          </>
+        )}
+
+        {showEmpty && (
           <div className="empty-results">
             <div className="empty-icon" aria-hidden="true" />
             <p>
-              Complete el formulario y procese la consulta para ver los
-              resultados.
+              Complete el formulario y genere el borrador para revisar y editar
+              la consulta antes de finalizar.
             </p>
           </div>
         )}

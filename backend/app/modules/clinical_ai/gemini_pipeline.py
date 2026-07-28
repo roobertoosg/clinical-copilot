@@ -28,22 +28,38 @@ def _append_catalog_instruction(system_prompt: str) -> str:
 
 
 def _clean_json_text(raw_text: str) -> str:
-    """Elimina fences markdown residuales antes de parsear el JSON."""
-    texto_json = raw_text.strip()
+    """Sanitiza la respuesta de Gemini extrayendo solo el objeto JSON raíz.
+
+    1. Elimina fences markdown (```json ... ```).
+    2. Toma estrictamente desde la primera ``{`` hasta la última ``}``
+       para descartar basura trailing que provoca ``JSONDecodeError: Extra data``.
+    """
+    texto_json = (raw_text or "").strip()
     if texto_json.startswith("```json"):
         texto_json = texto_json[7:]
     if texto_json.startswith("```"):
         texto_json = texto_json[3:]
     if texto_json.endswith("```"):
         texto_json = texto_json[:-3]
-    return texto_json.strip()
+    texto_json = texto_json.strip()
+
+    start_idx = texto_json.find("{")
+    end_idx = texto_json.rfind("}")
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        return texto_json[start_idx : end_idx + 1]
+    return texto_json
 
 
 # Configuración explícita de la Fase 2 (JSON clínico final)
 GEMINI_PHASE2_CONFIG = genai.types.GenerationConfig(
     response_mime_type="application/json",
-    temperature=0.2,
+    temperature=0.0,
     max_output_tokens=8192,
+)
+
+# Fase 1 (function calling): misma temperatura determinística
+GEMINI_PHASE1_CONFIG = genai.types.GenerationConfig(
+    temperature=0.0,
 )
 
 
@@ -128,7 +144,10 @@ def run_gemini_clinical_pipeline(
     json_response = None
     try:
         logger.info("Gemini Fase 1 — consulta de inventario farmacéutico (function calling)")
-        tool_response = chat.send_message(tool_phase_prompt)
+        tool_response = chat.send_message(
+            tool_phase_prompt,
+            generation_config=GEMINI_PHASE1_CONFIG,
+        )
         tool_summary = (tool_response.text or "").strip()
         logger.debug(
             "Gemini Fase 1 completada ({n} caracteres en respuesta).",

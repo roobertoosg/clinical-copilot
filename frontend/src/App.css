@@ -1468,8 +1468,250 @@
 .soape-item p {
   margin: 0;
   font-size: 0.9375rem;
-  line-height: 1.7;
-  color: #334155;
+  line-height: 1.65;
+  color: var(--color-text);
+  white-space: pre-wrap;
+}
+
+/* ── Human-in-the-Loop: revisión editable ───────────────────── */
+
+.review-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 12px;
+  color: #065f46;
+  font-size: 0.85rem;
+}
+
+.review-banner strong {
+  font-size: 0.9rem;
+}
+
+.accuracy-banner {
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  color: #1e3a8a;
+  font-size: 0.9rem;
+}
+
+.review-folio-badge {
+  margin-left: auto;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  color: #065f46;
+  background: #ecfdf5;
+  border-radius: 9999px;
+}
+
+.soape-grid--editable {
+  gap: 0.85rem;
+}
+
+.soape-item--editable {
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 0.85rem;
+}
+
+.soape-item--editable label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-primary);
+}
+
+.review-textarea,
+.review-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: #f8fafc;
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--color-text);
+  line-height: 1.5;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.review-textarea:focus,
+.review-input:focus {
+  outline: none;
+  background: #ffffff;
+  border-color: #6ee7b7;
+  box-shadow: 0 0 0 3px rgb(16 185 129 / 0.15);
+}
+
+.review-rx-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.review-rx-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding: 0.85rem;
+  background: #f8fafc;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  position: relative;
+}
+
+.review-rx-card-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.15rem;
+}
+
+.review-rx-index {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--color-muted);
+}
+
+.review-rx-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fff;
+  color: #b91c1c;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.review-rx-remove:hover {
+  background: #fef2f2;
+  border-color: #f87171;
+  transform: translateY(-1px);
+}
+
+.review-rx-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.review-rx-field--medication {
+  grid-column: 1 / -1;
+}
+
+.review-rx-field label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-muted);
+}
+
+.review-rx-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+
+.med-typeahead {
+  position: relative;
+}
+
+.med-typeahead-status {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  pointer-events: none;
+}
+
+.med-typeahead-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  margin: 0;
+  padding: 0.35rem;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow:
+    0 10px 28px -12px rgb(15 23 42 / 0.35),
+    0 2px 6px rgb(15 23 42 / 0.08);
+}
+
+.med-typeahead-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.med-typeahead-option:hover {
+  background: #ecfdf5;
+}
+
+.med-typeahead-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.med-typeahead-meta {
+  font-size: 0.72rem;
+  color: var(--color-muted);
+}
+
+.review-finalize-button {
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 720px) {
+  .review-rx-card {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ── Diagnoses ──────────────────────────────────────────────── */

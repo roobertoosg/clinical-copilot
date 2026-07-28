@@ -13,6 +13,21 @@ from app.modules.clinical_rag import router as clinical_rag_router
 # Crea las tablas (y verifica la conexión con PostgreSQL)
 try:
     models.Base.metadata.create_all(bind=engine)
+    # Asegura columna Human-in-the-Loop en DBs ya existentes (create_all no altera)
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if inspector.has_table("consultations"):
+        existing_cols = {c["name"] for c in inspector.get_columns("consultations")}
+        if "ai_accuracy_score" not in existing_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE consultations "
+                        "ADD COLUMN ai_accuracy_score FLOAT"
+                    )
+                )
+            logger.info("Columna consultations.ai_accuracy_score añadida.")
     logger.success("Conexión con PostgreSQL establecida y tablas verificadas.")
 except Exception as exc:
     logger.error(f"No se pudo conectar con PostgreSQL: {exc}")
