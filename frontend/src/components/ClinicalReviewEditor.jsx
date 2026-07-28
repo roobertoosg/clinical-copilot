@@ -26,66 +26,6 @@ const EMPTY_RX_ITEM = {
   indicaciones: '',
 }
 
-/** Catálogo mock mientras no exista el endpoint real de búsqueda. */
-const MOCK_MEDICATIONS = [
-  {
-    medicamento: 'Paracetamol 500 mg (Tempra)',
-    producto: 'Tempra 500 mg',
-    sustancia_activa: 'PARACETAMOL',
-    marca: 'Tempra',
-    laboratorio: 'Janssen',
-  },
-  {
-    medicamento: 'Ibuprofeno 400 mg (Advil)',
-    producto: 'Advil 400 mg',
-    sustancia_activa: 'IBUPROFENO',
-    marca: 'Advil',
-    laboratorio: 'Pfizer',
-  },
-  {
-    medicamento: 'Amoxicilina 500 mg (Amoxil)',
-    producto: 'Amoxil 500 mg',
-    sustancia_activa: 'AMOXICILINA',
-    marca: 'Amoxil',
-    laboratorio: 'GSK',
-  },
-  {
-    medicamento: 'Metformina 850 mg (Glucophage)',
-    producto: 'Glucophage 850 mg',
-    sustancia_activa: 'METFORMINA',
-    marca: 'Glucophage',
-    laboratorio: 'Merck',
-  },
-  {
-    medicamento: 'Omeprazol 20 mg (Losec)',
-    producto: 'Losec 20 mg',
-    sustancia_activa: 'OMEPRAZOL',
-    marca: 'Losec',
-    laboratorio: 'AstraZeneca',
-  },
-  {
-    medicamento: 'Losartán 50 mg (Cozaar)',
-    producto: 'Cozaar 50 mg',
-    sustancia_activa: 'LOSARTAN',
-    marca: 'Cozaar',
-    laboratorio: 'MSD',
-  },
-  {
-    medicamento: 'Salbutamol inhalador (Ventolin)',
-    producto: 'Ventolin Inhalador',
-    sustancia_activa: 'SALBUTAMOL',
-    marca: 'Ventolin',
-    laboratorio: 'GSK',
-  },
-  {
-    medicamento: 'Celecoxib 200 mg (Celebrex)',
-    producto: 'Celebrex 200 mg',
-    sustancia_activa: 'CELECOXIB',
-    marca: 'Celebrex',
-    laboratorio: 'Pfizer',
-  },
-]
-
 function formatMedicationLabel(item) {
   if (!item) return ''
   if (item.medicamento) return item.medicamento
@@ -99,9 +39,7 @@ function normalizeSuggestions(payload) {
     ? payload
     : Array.isArray(payload?.results)
       ? payload.results
-      : Array.isArray(payload?.items)
-        ? payload.items
-        : []
+      : []
 
   return list.map((item) => ({
     ...item,
@@ -110,30 +48,20 @@ function normalizeSuggestions(payload) {
 }
 
 /**
- * Busca medicamentos en el catálogo.
- * Intenta el endpoint real; si no está disponible, usa el mock local.
+ * Búsqueda difusa contra medications_catalog (PostgreSQL + pg_trgm).
+ * GET /api/v1/medications/search?q={term}&limit=10
  */
 async function searchMedications(term) {
   const q = term.trim()
   if (q.length < 2) return []
 
-  try {
-    const response = await fetch(
-      `${API_BASE}/api/medications/search?q=${encodeURIComponent(q)}`
-    )
-    if (response.ok) {
-      return normalizeSuggestions(await response.json())
-    }
-  } catch {
-    // Endpoint aún no disponible → mock
+  const response = await fetch(
+    `${API_BASE}/api/v1/medications/search?q=${encodeURIComponent(q)}&limit=10`
+  )
+  if (!response.ok) {
+    throw new Error(`Búsqueda de medicamentos falló (${response.status})`)
   }
-
-  const needle = q.toLowerCase()
-  return MOCK_MEDICATIONS.filter((med) =>
-    [med.medicamento, med.producto, med.sustancia_activa, med.marca]
-      .filter(Boolean)
-      .some((field) => field.toLowerCase().includes(needle))
-  ).slice(0, 10)
+  return normalizeSuggestions(await response.json())
 }
 
 /**

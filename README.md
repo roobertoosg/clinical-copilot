@@ -152,6 +152,16 @@ python scripts/load_catalog.py
 
 Carga `data/catalogo_2000_productos.csv` en la tabla `medications_catalog` (idempotente: si ya hay datos, no vuelve a insertar).
 
+Para forzar una recarga limpia:
+
+```bash
+python scripts/load_catalog.py --force
+```
+
+Al arrancar la API se habilita automáticamente la extensión **`pg_trgm`** (búsqueda difusa del typeahead):
+
+`GET /api/v1/medications/search?q=paracet&limit=10`
+
 ### 6. (Opcional) Ingestar guías clínicas en Qdrant
 
 Los PDFs viven en `backend/data/guidelines/`. Con Ollama y Qdrant corriendo:

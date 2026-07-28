@@ -211,12 +211,16 @@ class Diagnostic(Base):
 
 
 class MedicationCatalog(Base):
-    """Catálogo institucional de medicamentos disponibles (Capa 1 — SQL estructurado)."""
+    """Catálogo institucional de medicamentos (Capa 1 — SQL estructurado).
+
+    ``producto`` es el nombre/presentación comercial que se muestra en receta.
+    La búsqueda difusa del typeahead usa pg_trgm sobre producto, sustancia y marca.
+    """
 
     __tablename__ = "medications_catalog"
 
     id = Column(Integer, primary_key=True, index=True)
-    producto = Column(String, nullable=False)
+    producto = Column(String, nullable=False)  # Nombre / presentación
     marca = Column(String, nullable=True)
     sustancia_activa = Column(String, nullable=False, index=True)
     categoria = Column(String, nullable=True, index=True)

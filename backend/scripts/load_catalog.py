@@ -1,10 +1,11 @@
 """ETL idempotente: carga el catálogo de medicamentos desde CSV a PostgreSQL.
 
 Lee backend/data/catalogo_2000_productos.csv e inserta en medications_catalog.
-Si la tabla ya contiene registros, omite la carga.
+Si la tabla ya contiene registros, omite la carga (salvo ``--force``).
 
 Uso (desde backend/):
     ./venv/bin/python scripts/load_catalog.py
+    ./venv/bin/python scripts/load_catalog.py --force   # trunca y recarga
 """
 
 from __future__ import annotations
@@ -25,7 +26,15 @@ CSV_PATH = BACKEND_DIR / "data" / "catalogo_2000_productos.csv"
 BATCH_SIZE = 500
 
 
-def load_catalog() -> None:
+def _normalize_row(row: dict) -> dict:
+    """Limpia BOM / espacios en encabezados del CSV."""
+    return {
+        (k or "").lstrip("\ufeff").strip(): (v or "").strip()
+        for k, v in row.items()
+    }
+
+
+def load_catalog(*, force: bool = False) -> None:
     if not CSV_PATH.exists():
         print(f"❌ No se encontró el archivo CSV: {CSV_PATH}")
         sys.exit(1)
@@ -36,29 +45,40 @@ def load_catalog() -> None:
     db = SessionLocal()
     try:
         existing = db.query(MedicationCatalog).count()
-        if existing > 0:
+        if existing > 0 and not force:
             print(
                 f"⏭️  La tabla medications_catalog ya tiene {existing} registros. "
-                "Se omite la carga (idempotente)."
+                "Se omite la carga (idempotente). Usa --force para recargar."
             )
             return
+
+        if force and existing > 0:
+            print(f"🧹 --force: eliminando {existing} registros previos...")
+            db.query(MedicationCatalog).delete()
+            db.commit()
 
         print(f"📂 Leyendo catálogo desde {CSV_PATH.name}...")
         batch: list[MedicationCatalog] = []
         total = 0
 
-        with CSV_PATH.open(encoding="utf-8", newline="") as csv_file:
+        # utf-8-sig elimina BOM que rompe el header ``producto``
+        with CSV_PATH.open(encoding="utf-8-sig", newline="") as csv_file:
             reader = csv.DictReader(csv_file)
-            for row in reader:
+            for raw in reader:
+                row = _normalize_row(raw)
+                producto = row.get("producto") or ""
+                sustancia = row.get("sustancia_activa") or ""
+                if not producto and not sustancia:
+                    continue
                 batch.append(
                     MedicationCatalog(
-                        producto=(row.get("producto") or "").strip(),
-                        marca=(row.get("marca") or "").strip() or None,
-                        sustancia_activa=(row.get("sustancia_activa") or "").strip(),
-                        categoria=(row.get("categoria") or "").strip() or None,
-                        ean=(row.get("ean") or "").strip() or None,
-                        laboratorio=(row.get("laboratorio") or "").strip() or None,
-                        estatus=(row.get("estatus") or "ACTIVO").strip() or "ACTIVO",
+                        producto=producto,
+                        marca=row.get("marca") or None,
+                        sustancia_activa=sustancia,
+                        categoria=row.get("categoria") or None,
+                        ean=row.get("ean") or None,
+                        laboratorio=row.get("laboratorio") or None,
+                        estatus=row.get("estatus") or "ACTIVO",
                     )
                 )
                 if len(batch) >= BATCH_SIZE:
@@ -84,4 +104,4 @@ def load_catalog() -> None:
 
 
 if __name__ == "__main__":
-    load_catalog()
+    load_catalog(force="--force" in sys.argv)
