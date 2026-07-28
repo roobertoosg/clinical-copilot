@@ -26,6 +26,42 @@ const EMPTY_RX_ITEM = {
   indicaciones: '',
 }
 
+/** Compacta espacios y recorta extremos (sin tocar mayúsculas). */
+function collapseWhitespace(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+/**
+ * Sentence case: solo la primera letra de la oración en mayúscula.
+ * Ej: "CADA 8 HORAS" → "Cada 8 horas"
+ */
+function toSentenceCase(value) {
+  const text = collapseWhitespace(value)
+  if (!text) return ''
+  const lower = text.toLocaleLowerCase('es')
+  return lower.charAt(0).toLocaleUpperCase('es') + lower.slice(1)
+}
+
+/**
+ * Minúsculas estrictas para dosis / duración.
+ * Ej: "500 MG" → "500 mg", "7 DÍAS" → "7 días"
+ */
+function toStrictLowercase(value) {
+  const text = collapseWhitespace(value)
+  if (!text) return ''
+  return text.toLocaleLowerCase('es')
+}
+
+/** Normalizadores onBlur por campo (medicamento nunca se normaliza). */
+const RX_FIELD_NORMALIZERS = {
+  dosis: toStrictLowercase,
+  duracion: toStrictLowercase,
+  frecuencia: toSentenceCase,
+  indicaciones: toSentenceCase,
+}
+
 function formatMedicationLabel(item) {
   if (!item) return ''
   if (item.medicamento) return item.medicamento
@@ -221,6 +257,15 @@ function ClinicalReviewEditor({
     onChange({ ...data, receta: next })
   }
 
+  const normalizeRecetaFieldOnBlur = (index, field, rawValue) => {
+    const normalize = RX_FIELD_NORMALIZERS[field]
+    if (!normalize) return
+    const normalized = normalize(rawValue)
+    const current = receta[index]?.[field] || ''
+    if (normalized === current) return
+    updateRecetaField(index, field, normalized)
+  }
+
   const addMedicamento = () => {
     onChange({ ...data, receta: [...receta, { ...EMPTY_RX_ITEM }] })
   }
@@ -368,6 +413,9 @@ function ClinicalReviewEditor({
                         value={med?.[key] || ''}
                         onChange={(e) =>
                           updateRecetaField(index, key, e.target.value)
+                        }
+                        onBlur={(e) =>
+                          normalizeRecetaFieldOnBlur(index, key, e.target.value)
                         }
                       />
                     </div>
