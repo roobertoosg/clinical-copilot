@@ -86,7 +86,14 @@ function DashboardPage() {
   const patientsTotal = stats?.total_patients ?? 4
   const consultationsToday = stats?.consultations_today ?? 0
   const consultationsMonth = stats?.consultations_month ?? 18
-  const aiPrecision = stats?.ai_precision ?? 94
+
+  // Precisión IA dinámica (backend: current_ai_accuracy / ai_accuracy_trend)
+  const aiPrecision = Math.round(stats?.current_ai_accuracy ?? 100)
+  const aiTrendRaw = Number(stats?.ai_accuracy_trend ?? 0)
+  const aiTrendRounded = Math.round(aiTrendRaw)
+  const aiTrendSign = aiTrendRounded > 0 ? '+' : ''
+  const aiTrendText = `${aiTrendSign}${aiTrendRounded}% vs. mes anterior`
+  const aiTrendTone = aiTrendRounded > 0 ? 'up' : 'muted'
 
   const statCards = [
     {
@@ -122,7 +129,7 @@ function DashboardPage() {
       value: `${aiPrecision}%`,
       icon: Target,
       accent: 'stat-card--rose',
-      trend: { text: '+3% vs. mes anterior', tone: 'up' },
+      trend: { text: aiTrendText, tone: aiTrendTone },
     },
   ]
 

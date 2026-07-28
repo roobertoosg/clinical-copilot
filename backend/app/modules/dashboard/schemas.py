@@ -8,6 +8,10 @@ class DashboardStats(BaseModel):
 
     total_patients: int
     consultations_today: int
+    # Promedio de ai_accuracy_score del mes actual (0–100)
+    current_ai_accuracy: float = 100.0
+    # Diferencia vs. promedio del mes anterior (pp). 0 si no hay histórico.
+    ai_accuracy_trend: float = 0.0
 
 
 class RecentConsultationItem(BaseModel):
