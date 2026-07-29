@@ -87,9 +87,6 @@ function ConsultationForm({ onProcess, loading, onPatientLookup }) {
   const [physicalExam, setPhysicalExam] = useState('')
   const [conversationText, setConversationText] = useState('')
 
-  // Proveedor de IA seleccionado: 'gemini' (nube) u 'ollama' (local)
-  const [aiProvider, setAiProvider] = useState('gemini')
-
   // Grabación de audio (Speech-to-Text)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
@@ -252,7 +249,7 @@ function ConsultationForm({ onProcess, loading, onPatientLookup }) {
       conversation_text: conversationText,
       vital_signs: formatVitalSignsPayload(vitals),
       physical_exam: physicalExam,
-      ai_provider: aiProvider,
+      ai_provider: 'gemini',
     })
   }
 
@@ -271,45 +268,6 @@ function ConsultationForm({ onProcess, loading, onPatientLookup }) {
             <p className="doc-subtitle">
               Registre los datos clínicos y procese con la IA.
             </p>
-          </div>
-
-          <div
-            className="ai-provider-switch"
-            role="group"
-            aria-label="Proveedor de IA"
-          >
-            <button
-              type="button"
-              className={`ai-provider-option${
-                aiProvider === 'gemini' ? ' ai-provider-option--active' : ''
-              }`}
-              onClick={() => setAiProvider('gemini')}
-              aria-pressed={aiProvider === 'gemini'}
-            >
-              <span className="ai-provider-icon" aria-hidden="true">
-                ✨
-              </span>
-              <span className="ai-provider-text">
-                <span className="ai-provider-name">Gemini</span>
-                <span className="ai-provider-tag">Cloud · Recomendado</span>
-              </span>
-            </button>
-            <button
-              type="button"
-              className={`ai-provider-option${
-                aiProvider === 'ollama' ? ' ai-provider-option--active' : ''
-              }`}
-              onClick={() => setAiProvider('ollama')}
-              aria-pressed={aiProvider === 'ollama'}
-            >
-              <span className="ai-provider-icon" aria-hidden="true">
-                🦙
-              </span>
-              <span className="ai-provider-text">
-                <span className="ai-provider-name">Ollama</span>
-                <span className="ai-provider-tag">Local</span>
-              </span>
-            </button>
           </div>
         </div>
       </div>

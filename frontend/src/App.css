@@ -192,35 +192,16 @@
   color: #ffffff;
 }
 
-.brand-icon {
+.brand-logo {
   flex-shrink: 0;
   width: 2.35rem;
-  height: 2.35rem;
-  border-radius: 9999px;
-  background:
-    radial-gradient(circle at 35% 30%, #34d399 0%, transparent 45%),
-    radial-gradient(circle at 70% 65%, #059669 0%, transparent 50%),
-    linear-gradient(145deg, #10b981 0%, #047857 100%);
-  box-shadow:
-    0 4px 14px -2px rgb(16 185 129 / 0.45),
-    inset 0 1px 0 rgb(255 255 255 / 0.25);
-  position: relative;
+  height: auto;
+  display: block;
+  object-fit: contain;
 }
 
-.brand-icon::before {
-  content: '';
-  position: absolute;
-  inset: 7px;
-  border: 2px solid rgb(255 255 255 / 0.75);
-  border-radius: 9999px;
-}
-
-.brand-icon::after {
-  content: '';
-  position: absolute;
-  inset: 11px;
-  border-radius: 9999px;
-  background: rgb(255 255 255 / 0.35);
+.sidebar--collapsed .brand-logo {
+  width: 2.1rem;
 }
 
 .sidebar-nav {

@@ -6,7 +6,6 @@ import DashboardPage from './pages/DashboardPage'
 import PatientsPage from './pages/PatientsPage'
 import ConsultationsPage from './pages/ConsultationsPage'
 import HistoryPage from './pages/HistoryPage'
-import PlaceholderPage from './pages/PlaceholderPage'
 
 function App() {
   return (
@@ -17,15 +16,6 @@ function App() {
         <Route path="pacientes" element={<PatientsPage />} />
         <Route path="consultas" element={<ConsultationsPage />} />
         <Route path="historial" element={<HistoryPage />} />
-        <Route
-          path="configuracion"
-          element={
-            <PlaceholderPage
-              title="Configuración"
-              description="La configuración del sistema estará disponible próximamente."
-            />
-          }
-        />
       </Route>
     </Routes>
   )

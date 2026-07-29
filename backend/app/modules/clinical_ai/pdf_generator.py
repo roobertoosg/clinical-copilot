@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from io import BytesIO
+from pathlib import Path
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT
@@ -16,6 +17,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import (
+    Image,
     KeepTogether,
     Paragraph,
     SimpleDocTemplate,
@@ -23,6 +25,9 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+# Isotipo Aura (PNG generado desde el SVG del frontend)
+_LOGO_PATH = Path(__file__).resolve().parents[2] / "assets" / "logo.png"
 
 # Paleta de diseño (coherente con el frontend: azul/blanco, gris claro)
 PRIMARY = colors.HexColor("#1d4ed8")   # Azul principal
@@ -137,12 +142,40 @@ def _build_styles() -> dict:
     return styles
 
 
-def _header(patient, doctor, styles) -> Table:
-    """Encabezado: título a la izquierda y datos del doctor a la derecha."""
-    title_block = [
+def _brand_block(styles) -> Table:
+    """Logo + nombre del producto para el encabezado del PDF."""
+    title_col = [
         Paragraph("Aura Clinical Copilot", styles["title"]),
         Paragraph("Reporte de consulta clínica", styles["subtitle"]),
     ]
+
+    if _LOGO_PATH.is_file():
+        logo = Image(str(_LOGO_PATH), width=12 * mm, height=12.6 * mm)
+        brand = Table(
+            [[logo, title_col]],
+            colWidths=[14 * mm, 86 * mm],
+        )
+        brand.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (0, 0), 3),
+                    ("RIGHTPADDING", (1, 0), (1, 0), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                    ("ALIGN", (1, 0), (1, 0), "LEFT"),
+                ]
+            )
+        )
+        return brand
+
+    return Table([[title_col]], colWidths=[100 * mm])
+
+
+def _header(patient, doctor, styles) -> Table:
+    """Encabezado: logo + título a la izquierda y datos del doctor a la derecha."""
+    brand_block = _brand_block(styles)
 
     if doctor is not None:
         doctor_lines = [
@@ -156,17 +189,17 @@ def _header(patient, doctor, styles) -> Table:
     doctor_block = [Paragraph(doctor_html, styles["doctor"])]
 
     header = Table(
-        [[title_block, doctor_block]],
+        [[brand_block, doctor_block]],
         colWidths=[100 * mm, 70 * mm],
     )
     header.setStyle(
         TableStyle(
             [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                 ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ("LINEBELOW", (0, 0), (-1, -1), 1.2, PRIMARY),
             ]
         )

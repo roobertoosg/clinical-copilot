@@ -7,9 +7,9 @@ import {
   Home,
   PanelLeftClose,
   PanelLeftOpen,
-  Settings,
   Users,
 } from 'lucide-react'
+import logoUrl from '../assets/logo.svg'
 
 const navItems = [
   { to: '/dashboard', label: 'Inicio', icon: Home },
@@ -17,7 +17,6 @@ const navItems = [
   { to: '/consultas', label: 'Consultas', icon: FileText },
   { to: '/pacientes', label: 'Pacientes', icon: Users },
   { to: '/historial', label: 'Historial', icon: History },
-  { to: '/configuracion', label: 'Configuración', icon: Settings },
 ]
 
 function Sidebar({ isCollapsed, toggleSidebar }) {
@@ -52,7 +51,13 @@ function Sidebar({ isCollapsed, toggleSidebar }) {
     >
       <div className="sidebar-top">
         <div className="sidebar-brand">
-          <div className="brand-icon" aria-hidden="true" />
+          <img
+            className="brand-logo"
+            src={logoUrl}
+            alt="Aura Clinical Copilot"
+            width={38}
+            height={40}
+          />
           <div className="sidebar-brand-text">
             <span className="sidebar-brand-title">AURA CLINICAL</span>
             <span className="sidebar-brand-subtitle">COPILOT</span>
