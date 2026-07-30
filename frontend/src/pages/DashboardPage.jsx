@@ -18,12 +18,6 @@ import {
 const API_BASE = 'http://localhost:8000'
 const DOCTOR_NAME = 'Dr. Ricardo Mendoza'
 
-const SYSTEM_ACTIVITY = [
-  { id: 1, message: 'Sistema iniciado correctamente', time: 'Hoy, 08:00 a.m.' },
-  { id: 2, message: 'IA Gemini conectada', time: 'Hoy, 08:00 a.m.' },
-  { id: 3, message: 'Base de datos sincronizada', time: 'Hoy, 08:00 a.m.' },
-]
-
 function formatDateTime(value) {
   if (!value) return '—'
   const date = new Date(value)
@@ -287,9 +281,6 @@ function DashboardPage() {
                 />
                 Alertas Críticas
               </h2>
-              <button type="button" className="link-button" onClick={() => navigate('/historial')}>
-                Ver todas <ChevronRight size={14} strokeWidth={2.5} aria-hidden="true" />
-              </button>
             </div>
 
             {alertsLoading ? (
@@ -334,26 +325,6 @@ function DashboardPage() {
                 <p>Sin alertas críticas recientes. Todo en orden.</p>
               </div>
             )}
-          </section>
-
-          <section className="dashboard-panel dashboard-panel--activity">
-            <div className="dashboard-panel-head">
-              <h2 className="dashboard-panel-title">Actividad del Sistema</h2>
-              <button type="button" className="link-button" onClick={() => navigate('/historial')}>
-                Ver bitácora
-              </button>
-            </div>
-            <ul className="system-activity-list">
-              {SYSTEM_ACTIVITY.map((event) => (
-                <li key={event.id} className="system-activity-item">
-                  <span className="system-activity-dot" aria-hidden="true" />
-                  <span className="system-activity-body">
-                    <span className="system-activity-message">{event.message}</span>
-                    <span className="system-activity-time">{event.time}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
           </section>
         </div>
       </div>
