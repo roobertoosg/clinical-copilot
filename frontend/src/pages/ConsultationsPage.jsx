@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import ClinicalCards from '../components/ClinicalCards'
 import { downloadConsultationPdf } from '../utils/exportPdf'
-
-const API_BASE = 'http://localhost:8000'
+import { API_BASE } from '../config'
 
 function formatDate(value) {
   if (!value) return '—'

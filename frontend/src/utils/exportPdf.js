@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:8000'
+import { API_BASE } from '../config'
 
 /**
  * Descarga el PDF de una consulta y simula el clic de guardado en el navegador.

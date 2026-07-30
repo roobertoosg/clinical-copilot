@@ -3,8 +3,7 @@ import PatientProfile from '../components/PatientProfile'
 import ConsultationForm from '../components/ConsultationForm'
 import AIResults from '../components/AIResults'
 import { downloadConsultationPdf } from '../utils/exportPdf'
-
-const API_BASE = 'http://localhost:8000'
+import { API_BASE } from '../config'
 
 function cloneClinicalData(data) {
   return JSON.parse(JSON.stringify(data))

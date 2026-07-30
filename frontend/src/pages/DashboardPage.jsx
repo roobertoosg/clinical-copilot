@@ -14,8 +14,8 @@ import {
   Users,
   AlertTriangle,
 } from 'lucide-react'
+import { API_BASE } from '../config'
 
-const API_BASE = 'http://localhost:8000'
 const DOCTOR_NAME = 'Dr. Ricardo Mendoza'
 
 function formatDateTime(value) {

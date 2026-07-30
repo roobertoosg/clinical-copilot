@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { downloadConsultationPdf } from '../utils/exportPdf'
-
-const API_BASE = 'http://localhost:8000'
+import { API_BASE } from '../config'
 
 const typeMeta = {
   patient: { icon: '☺', label: 'Paciente', className: 'timeline-marker--patient' },

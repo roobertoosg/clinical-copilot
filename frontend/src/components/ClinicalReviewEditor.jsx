@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-
-const API_BASE = 'http://localhost:8000'
+import { API_BASE } from '../config'
 
 const SOAPE_FIELDS = [
   { key: 'subjetivo', label: 'Subjetivo' },

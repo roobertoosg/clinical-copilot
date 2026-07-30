@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import PatientProfile from '../components/PatientProfile'
-
-const API_BASE = 'http://localhost:8000'
+import { API_BASE } from '../config'
 
 const emptyForm = {
   first_name: '',
