@@ -7,7 +7,7 @@ largo del SOAPE fluya y salte de página automáticamente sin cortarse.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
@@ -25,6 +25,8 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+from app.db.models import MEXICO_TZ
 
 # Isotipo Aura (PNG generado desde el SVG del frontend)
 _LOGO_PATH = Path(__file__).resolve().parents[2] / "assets" / "logo.png"
@@ -53,10 +55,17 @@ def _calculate_age(date_of_birth) -> str:
 
 
 def _format_date(value) -> str:
+    """Solo fecha (dd/mm/yyyy) en America/Mexico_City — sin hora."""
     if not value:
         return "—"
     if isinstance(value, datetime):
-        return value.strftime("%d/%m/%Y %H:%M")
+        dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.astimezone(MEXICO_TZ)
+        return dt.strftime("%d/%m/%Y")
+    if isinstance(value, date):
+        return value.strftime("%d/%m/%Y")
     return str(value)
 
 
