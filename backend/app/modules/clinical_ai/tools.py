@@ -17,8 +17,9 @@ def consultar_inventario_farmacia(sustancia_activa: str, categoria: str = "") ->
     genérico) y devuelve los productos comerciales reales con marca, laboratorio
     y código EAN registrados en el inventario.
 
-    Usa los resultados para rellenar el campo "medicamento" de la receta con el
-    nombre comercial exacto (producto + marca) tal como aparece en el catálogo.
+    Usa los resultados para rellenar la receta:
+    - "sustancia_activa": la denominación genérica (campo sustancia_activa del catálogo).
+    - "medicamento": el nombre comercial exacto (producto + marca) tal como aparece aquí.
     NUNCA inventes nombres comerciales, marcas, laboratorios ni códigos EAN.
 
     Args:

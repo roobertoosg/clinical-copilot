@@ -3,6 +3,8 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, field_validator
 
+from .patient_summary import coerce_patient_summary
+
 
 class ConsultationInput(BaseModel):
     patient_id: int
@@ -16,13 +18,23 @@ class ConsultationInput(BaseModel):
 class PrescriptionItem(BaseModel):
     """Un medicamento de la receta, estructurado por campo."""
 
-    medicamento: str
+    # Denominación genérica (obligatoria por normativa; va primero en la receta)
+    sustancia_activa: str = ""
+    medicamento: str = ""
     dosis: str = ""
     frecuencia: str = ""
     duracion: str = ""
     indicaciones: str = ""
 
-    @field_validator("medicamento", "dosis", "frecuencia", "duracion", "indicaciones", mode="before")
+    @field_validator(
+        "sustancia_activa",
+        "medicamento",
+        "dosis",
+        "frecuencia",
+        "duracion",
+        "indicaciones",
+        mode="before",
+    )
     @classmethod
     def _none_to_empty(cls, value):
         return "" if value is None else value
@@ -41,17 +53,43 @@ class AlertItem(BaseModel):
         return "" if value is None else value
 
 
+class PatientSummary(BaseModel):
+    """Instrucciones claras para el paciente (va en la receta PDF)."""
+
+    diagnostico_simple: str = ""
+    instrucciones_medicinas: str = ""
+    cuidados_casa: str = ""
+    senales_alarma: str = ""
+
+    @field_validator(
+        "diagnostico_simple",
+        "instrucciones_medicinas",
+        "cuidados_casa",
+        "senales_alarma",
+        mode="before",
+    )
+    @classmethod
+    def _none_to_empty(cls, value):
+        return "" if value is None else value
+
+
 class AIClinicalOutput(BaseModel):
     soape: Dict
     diagnosticos_sugeridos: List[Dict]
     receta: List[PrescriptionItem]
-    resumen_paciente: str
+    resumen_paciente: PatientSummary
     alertas: List[AlertItem] = []
     # Folio de la consulta ya persistida (lo rellena el router tras guardar);
     # permite al frontend exportar el PDF inmediatamente desde el Workspace.
     folio: Optional[str] = None
     # Similitud SOAPE IA vs. médico (0.0–1.0); se rellena en finalize-consultation
     ai_accuracy_score: Optional[float] = None
+
+    @field_validator("resumen_paciente", mode="before")
+    @classmethod
+    def _coerce_patient_summary(cls, value):
+        """Tolera string legado o dict parcial del LLM."""
+        return coerce_patient_summary(value)
 
     @field_validator("receta", mode="before")
     @classmethod
@@ -122,6 +160,7 @@ class GeminiDiagnosticItem(BaseModel):
 
 
 class GeminiPrescriptionItem(BaseModel):
+    sustancia_activa: str
     medicamento: str
     dosis: str
     frecuencia: str
@@ -135,13 +174,20 @@ class GeminiAlertItem(BaseModel):
     severidad: str
 
 
+class GeminiPatientSummary(BaseModel):
+    diagnostico_simple: str
+    instrucciones_medicinas: str
+    cuidados_casa: str
+    senales_alarma: str
+
+
 class GeminiClinicalOutput(BaseModel):
     """Copia estricta de AIClinicalOutput para el motor de Gemini (sin defaults)."""
 
     soape: GeminiSoape
     diagnosticos_sugeridos: List[GeminiDiagnosticItem]
     receta: List[GeminiPrescriptionItem]
-    resumen_paciente: str
+    resumen_paciente: GeminiPatientSummary
     alertas: List[GeminiAlertItem]
 
 
@@ -167,8 +213,19 @@ class ConsultationDetail(BaseModel):
     status: Optional[str]
     patient_id: int
     patient_name: str
-    resumen_paciente: Optional[str]
+    resumen_paciente: Optional[PatientSummary] = None
     soape: Dict
     diagnosticos_sugeridos: List[Dict]
     receta: List[PrescriptionItem]
     alertas: List[AlertItem]
+
+
+class Icd11SearchItem(BaseModel):
+    """Resultado de búsqueda CIE-11 para typeahead del médico."""
+
+    codigo: str
+    descripcion: str
+
+
+class Icd11SearchResponse(BaseModel):
+    results: List[Icd11SearchItem]

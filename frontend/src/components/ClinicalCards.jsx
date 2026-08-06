@@ -1,3 +1,9 @@
+import {
+  PATIENT_SUMMARY_FIELDS,
+  normalizePatientSummary,
+  patientSummaryHasContent,
+} from '../utils/patientSummary'
+
 const soapeFields = [
   { key: 'subjetivo', label: 'Subjetivo' },
   { key: 'objetivo', label: 'Objetivo' },
@@ -109,7 +115,7 @@ function ClinicalCards({ data }) {
               <table className="prescription-table">
                 <thead>
                   <tr>
-                    <th>Medicamento</th>
+                    <th>Denominación genérica</th>
                     <th>Dosis</th>
                     <th>Frecuencia</th>
                     <th>Duración</th>
@@ -119,8 +125,16 @@ function ClinicalCards({ data }) {
                 <tbody>
                   {data.receta.map((med, index) => (
                     <tr key={index}>
-                      <td data-label="Medicamento" className="med-name">
-                        {med.medicamento || '—'}
+                      <td data-label="Denominación genérica" className="med-name">
+                        {med.sustancia_activa || med.medicamento || '—'}
+                        {med.sustancia_activa &&
+                          med.medicamento &&
+                          med.medicamento.toLowerCase() !==
+                            med.sustancia_activa.toLowerCase() && (
+                            <span className="med-commercial">
+                              {med.medicamento}
+                            </span>
+                          )}
                       </td>
                       <td data-label="Dosis">{med.dosis || '—'}</td>
                       <td data-label="Frecuencia">{med.frecuencia || '—'}</td>
@@ -137,14 +151,23 @@ function ClinicalCards({ data }) {
         </div>
       </div>
 
-      {data.resumen_paciente != null && (
+      {patientSummaryHasContent(data.resumen_paciente) && (
         <div className="card card--summary">
           <h3 className="card-header">
             <span className="card-header-bar" aria-hidden="true" />
-            Resumen para el paciente
+            Indicaciones para el paciente
           </h3>
-          <div className="card-body">
-            <p className="patient-summary">{data.resumen_paciente || '—'}</p>
+          <div className="card-body review-patient-summary">
+            {PATIENT_SUMMARY_FIELDS.map(({ key, label }) => {
+              const text = normalizePatientSummary(data.resumen_paciente)[key]
+              if (!String(text || '').trim()) return null
+              return (
+                <div key={key} className="review-summary-field">
+                  <span className="review-summary-label">{label}</span>
+                  <p className="patient-summary">{text}</p>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

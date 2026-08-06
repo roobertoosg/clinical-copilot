@@ -3,10 +3,13 @@ import PatientProfile from '../components/PatientProfile'
 import ConsultationForm from '../components/ConsultationForm'
 import AIResults from '../components/AIResults'
 import { downloadConsultationPdfs } from '../utils/exportPdf'
+import { normalizePatientSummary } from '../utils/patientSummary'
 import { API_BASE } from '../config'
 
 function cloneClinicalData(data) {
-  return JSON.parse(JSON.stringify(data))
+  const cloned = JSON.parse(JSON.stringify(data))
+  cloned.resumen_paciente = normalizePatientSummary(cloned.resumen_paciente)
+  return cloned
 }
 
 function ClinicalWorkspace() {

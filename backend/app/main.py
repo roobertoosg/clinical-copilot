@@ -69,6 +69,18 @@ try:
                 },
             )
 
+    # Denominación genérica en receta (normativa: sustancia activa primero)
+    if inspector.has_table("prescriptions"):
+        rx_cols = {c["name"] for c in inspector.get_columns("prescriptions")}
+        if "active_ingredient" not in rx_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE prescriptions ADD COLUMN active_ingredient VARCHAR"
+                    )
+                )
+            logger.info("Columna prescriptions.active_ingredient añadida.")
+
     # Extensión + índices GIN para typeahead de medicamentos (pg_trgm)
     medications_router.ensure_pg_trgm(engine)
 

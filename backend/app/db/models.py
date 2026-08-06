@@ -171,6 +171,9 @@ class Prescription(Base):
         nullable=False,
         index=True,
     )
+    # Denominación genérica (sustancia activa). Debe ir primero en la receta
+    # impresa por normativa mexicana; el nombre comercial es complementario.
+    active_ingredient = Column(String, nullable=True)
     medication = Column(String, nullable=False)
     dose = Column(String, nullable=True)
     frequency = Column(String, nullable=True)

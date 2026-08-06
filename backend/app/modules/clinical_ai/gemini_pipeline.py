@@ -18,8 +18,17 @@ REGLA DE CATÁLOGO FARMACÉUTICO (OBLIGATORIO — CAPA 1):
 Antes de incluir CUALQUIER medicamento en la sección "receta" del JSON final, DEBES invocar
 la herramienta `consultar_inventario_farmacia` para cada sustancia activa que vayas a prescribir.
 Usa EXCLUSIVAMENTE los productos, marcas, laboratorios y códigos EAN devueltos por la herramienta.
+Cada ítem de la receta debe llevar "sustancia_activa" (denominación genérica del catálogo) y
+"medicamento" (nombre comercial exacto del catálogo). La denominación genérica es obligatoria.
 Si la herramienta no devuelve resultados para una sustancia, NO incluyas ese medicamento en la receta;
 genera una alerta clínica explicando que no hay producto disponible en el catálogo institucional.
+
+REGLA DE RECETA NO VACÍA (CONSULTA AMBULATORIA):
+Si el Plan clínico implica tratamiento farmacológico o de rehidratación (ej. antibiótico,
+analgésico/antipirético, sales de rehidratación, antiemético), DEBES consultar el catálogo
+y dejar 'receta' con al menos un producto verificado. No dejes 'receta': [] solo porque
+estés siendo cauteloso con el diagnóstico: la cautela va en 'probabilidad' y en el texto
+del análisis, no en omitir por completo el tratamiento indicado y disponible en inventario.
 """
 
 
@@ -91,8 +100,10 @@ def _build_rag_enriched_prompt(
     rag_block = (
         "=== CONTEXTO CLÍNICO DE REFERENCIA (GUÍAS/NOM) ===\n"
         + "\n\n".join(context_chunks)
-        + "\n(Nota para el LLM: Utiliza este contexto como apoyo informativo, "
-        "pero la prioridad es la seguridad clínica).\n\n"
+        + "\n(Nota para el LLM: Usa este material SOLO como apoyo normativo/guía. "
+        "NO copies diagnósticos ni casos de ejemplo del texto. Los diagnósticos "
+        "deben basarse únicamente en la consulta actual; prioridad: seguridad "
+        "clínica del paciente de hoy).\n\n"
     )
     logger.info(
         "RAG — {n} chunk(s) inyectados al prompt de Fase 1.",
@@ -159,7 +170,18 @@ def run_gemini_clinical_pipeline(
             "Con base en el análisis clínico y los productos verificados en el catálogo, "
             "genera AHORA ÚNICAMENTE el JSON clínico final con la estructura obligatoria "
             "(soape, diagnosticos_sugeridos, receta, resumen_paciente, alertas). "
-            "En 'receta', usa los nombres comerciales exactos del inventario consultado. "
+            "En 'receta', usa los nombres comerciales exactos del inventario consultado "
+            "y NO dejes la lista vacía si en Fase 1 verificaste productos aplicables "
+            "al plan de esta consulta. "
+            "Cada ítem de 'receta' DEBE traer 'sustancia_activa' (denominación genérica, "
+            "obligatoria por normativa) además de 'medicamento' (nombre comercial del catálogo). "
+            "En 'resumen_paciente' usa EXACTAMENTE las 4 claves: diagnostico_simple, "
+            "instrucciones_medicinas, cuidados_casa, senales_alarma; lenguaje sencillo "
+            "para el paciente, sin jerga clínica. Si hay medicamentos en 'receta', "
+            "'instrucciones_medicinas' NO puede ir vacío (refuerzo breve, sin copiar la tabla). "
+            "CRÍTICO: diagnosticos_sugeridos SOLO de la consulta ACTUAL "
+            "(conversación/vitals/examen de este paciente). "
+            "Prohibido arrastrar enfermedades de guías, ejemplos de estilo u otras consultas. "
             "NO incluyas markdown ni texto fuera del JSON.",
             generation_config=GEMINI_PHASE2_CONFIG,
         )

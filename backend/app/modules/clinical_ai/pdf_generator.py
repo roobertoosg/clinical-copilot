@@ -27,6 +27,10 @@ from reportlab.platypus import (
 )
 
 from app.db.models import MEXICO_TZ
+from app.modules.clinical_ai.patient_summary import (
+    coerce_patient_summary,
+    summary_has_content,
+)
 
 # Isotipo Aura (PNG generado desde el SVG del frontend)
 _LOGO_PATH = Path(__file__).resolve().parents[2] / "assets" / "logo.png"
@@ -327,22 +331,40 @@ def _clinical_section(title, text, styles) -> KeepTogether:
 
 
 def _prescription_table(prescriptions, styles) -> Table:
-    """Tabla de receta con encabezados."""
+    """Tabla de receta: denominación genérica primero (normativa mexicana)."""
     header_row = [
-        Paragraph("Medicamento", styles["cell_head"]),
+        Paragraph("Denominación genérica", styles["cell_head"]),
         Paragraph("Dosis", styles["cell_head"]),
         Paragraph("Frecuencia", styles["cell_head"]),
         Paragraph("Duración", styles["cell_head"]),
     ]
     rows = [header_row]
     for p in prescriptions or []:
-        med = p.medication or "—"
+        generic = (getattr(p, "active_ingredient", None) or "").strip()
+        commercial = (p.medication or "").strip()
+
+        # Genérico como dato principal; comercial en segunda línea (complementario)
+        if generic:
+            main = generic
+            secondary_bits = []
+            if commercial and commercial.lower() != generic.lower():
+                secondary_bits.append(f"Comercial: {commercial}")
+        else:
+            main = commercial or "—"
+            secondary_bits = []
+
         indications = (getattr(p, "indications", None) or "").strip()
         if indications:
-            med = f"{med}<br/><font color='#64748b' size='8'>{indications}</font>"
+            secondary_bits.append(indications)
+
+        med_html = f"<b>{main}</b>"
+        if secondary_bits:
+            detail = "<br/>".join(secondary_bits)
+            med_html += f"<br/><font color='#64748b' size='8'>{detail}</font>"
+
         rows.append(
             [
-                Paragraph(med, styles["cell"]),
+                Paragraph(med_html, styles["cell"]),
                 Paragraph(p.dose or "—", styles["cell"]),
                 Paragraph(p.frequency or "—", styles["cell"]),
                 Paragraph(p.duration or "—", styles["cell"]),
@@ -516,10 +538,19 @@ def generate_prescription_pdf(
         story.append(Paragraph("Sin medicamentos prescritos.", styles["body"]))
     story.append(Spacer(1, 10))
 
-    summary = (patient_summary or "").strip()
+    summary = coerce_patient_summary(patient_summary)
     story.append(Paragraph("Indicaciones y cuidados", styles["section"]))
-    if summary:
-        story.append(Paragraph(summary.replace("\n", "<br/>"), styles["body"]))
+    sections = (
+        ("Qué le diagnosticaron", summary["diagnostico_simple"]),
+        ("Cómo tomar sus medicinas", summary["instrucciones_medicinas"]),
+        ("Cuidados en casa", summary["cuidados_casa"]),
+        ("Señales de alarma", summary["senales_alarma"]),
+    )
+    if summary_has_content(summary):
+        for title, text in sections:
+            if not (text or "").strip():
+                continue
+            story.append(_clinical_section(title, text, styles))
     else:
         story.append(
             Paragraph(

@@ -414,3 +414,38 @@ async def enrich_diagnoses_with_icd11(
         n=len(enriched),
     )
     return list(enriched)
+
+
+async def search_icd11_options(
+    query: str,
+    *,
+    limit: int = 10,
+    client: ICD11Client | None = None,
+) -> list[dict[str, str]]:
+    """Busca opciones CIE-11 para typeahead del médico (código + título)."""
+    q = (query or "").strip()
+    if len(q) < 2:
+        return []
+
+    icd_client = client or get_icd11_client()
+    raw = await icd_client.search_diagnosis(q)
+    entities = raw.get("destinationEntities") or []
+    results: list[dict[str, str]] = []
+
+    for entity in entities:
+        if not isinstance(entity, dict):
+            continue
+        code = str(entity.get("theCode") or "").strip()
+        title = _normalize_icd_title(entity.get("title"))
+        if not title:
+            continue
+        results.append(
+            {
+                "codigo": code or ICD11_FALLBACK_CODE,
+                "descripcion": title,
+            }
+        )
+        if len(results) >= limit:
+            break
+
+    return results

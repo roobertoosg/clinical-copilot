@@ -1753,7 +1753,114 @@
   border: 1px solid var(--color-border);
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.review-dx-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.review-dx-prob {
+  margin-left: auto;
+}
+
+.review-dx-prob-select {
+  width: auto;
+  min-width: 6.5rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.review-dx-add {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #f1f5f9;
+}
+
+.review-dx-add-label {
+  margin: 0 0 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.review-dx-option {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.review-dx-option .med-typeahead-name {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Typeaheads del editor: el .card tiene overflow:hidden y recorta el dropdown */
+.review-editor .card--diagnosis,
+.review-editor .card--prescription {
+  overflow: visible;
+  position: relative;
+}
+
+.review-editor .card--diagnosis {
+  z-index: 4; /* por encima de Receta (sigue abajo en el DOM) */
+}
+
+.review-editor .card--prescription {
+  z-index: 3;
+}
+
+.review-editor .card--summary {
+  position: relative;
+  z-index: 1;
+}
+
+.review-editor .med-typeahead-dropdown {
+  z-index: 80;
+}
+
+.review-dx-typeahead {
+  position: relative;
+  z-index: 5;
+}
+
 /* ── Patient summary ────────────────────────────────────────── */
+
+.review-patient-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.review-summary-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.review-summary-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.review-summary-hint {
+  font-size: 0.75rem;
+  color: var(--color-muted, #64748b);
+}
 
 .patient-summary {
   margin: 0;
@@ -1912,6 +2019,15 @@
   font-weight: 700;
   color: #9a3412;
   white-space: nowrap;
+}
+
+.prescription-table .med-commercial {
+  display: block;
+  margin-top: 2px;
+  font-weight: 500;
+  font-size: 0.78rem;
+  color: #64748b;
+  white-space: normal;
 }
 
 /* ── Patients page ──────────────────────────────────────────── */

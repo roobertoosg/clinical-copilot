@@ -21,9 +21,10 @@ from app.modules.clinical_rag.doctor_feedback import (
     retrieve_doctor_style_examples,
     store_doctor_feedback,
 )
-from app.services.icd11_service import enrich_diagnoses_with_icd11
+from app.services.icd11_service import enrich_diagnoses_with_icd11, search_icd11_options
 from . import crud
 from .gemini_pipeline import run_gemini_clinical_pipeline
+from .patient_summary import parse_patient_summary
 from .pdf_generator import generate_clinical_note_pdf, generate_prescription_pdf
 from .schemas import (
     AIClinicalOutput,
@@ -32,6 +33,7 @@ from .schemas import (
     ConsultationDetail,
     FinalizeConsultationRequest,
     FinalizeConsultationResponse,
+    Icd11SearchResponse,
 )
 
 load_dotenv()
@@ -83,27 +85,53 @@ TUS REGLAS CRÍTICAS DE COMPORTAMIENTO:
 2. CERO ALUCINACIONES: No inventes información, síntomas, medicamentos, ni signos vitales que no estén explícitamente en el texto provisto. Utiliza EXACTAMENTE la edad proporcionada en los datos del paciente. NUNCA intentes calcularla ni modificarla.
 3. FORMATO ESTRICTO: Devuelve ÚNICAMENTE un JSON válido. NINGÚN texto antes, NINGÚN texto después, ni bloques de código markdown (```json).
 4. SEGURIDAD DEL PACIENTE (PRIORIDAD MÁXIMA): Compara SIEMPRE los medicamentos a recetar con las alergias registradas del paciente. Si hay riesgo de reacción cruzada o alergia, GENERA UNA ALERTA DE SEVERIDAD 'Alta' y OMITE ese medicamento de la receta. Sugiere una alternativa en el 'Plan'.
+5. AISLAMIENTO DE CONTEXTO (OBLIGATORIO): Si recibes ejemplos de estilo del médico, guías clínicas u otros documentos de referencia, úsalos SOLO como plantilla de formato, tono y estructura. Los diagnósticos, enfermedades, códigos CIE-11, hallazgos y planes terapéuticos deben extraerse EXCLUSIVAMENTE de la conversación, signos vitales y examen físico de LA CONSULTA ACTUAL. Está ESTRICTAMENTE PROHIBIDO arrastrar, copiar o inferir patologías de documentos de otras consultas o del historial de estilo.
 
 REGLAS DE RAZONAMIENTO CLÍNICO (SOAPE Y DIAGNÓSTICOS):
 - SUBJETIVO: Extrae el malestar principal, evolución y síntomas referidos por el paciente en la conversación.
-- OBJETIVO: Basa esto en los 'Signos vitales' y 'Examen físico'. Si están vacíos o no se mencionan en la charla, usa estrictamente la frase: "Pendiente de exploración física completa". NUNCA lo dejes en blanco.
-- ANÁLISIS: Justifica brevemente por qué sugieres los diagnósticos basados en el Subjetivo y Objetivo.
+- OBJETIVO: Basa esto en los 'Signos vitales' y 'Examen físico'. Si van vacíos o no se mencionan en la charla, usa estrictamente la frase: "Pendiente de exploración física completa". NUNCA lo dejes en blanco.
+- ANÁLISIS: Justifica brevemente por qué sugieres los diagnósticos basados en el Subjetivo y Objetivo de ESTA consulta (no de ejemplos previos).
 - PLAN: Define los pasos a seguir (laboratorios, tratamiento, reposo). Si no hay datos, infiere el siguiente paso lógico (ej. "Realizar exploración física y prescribir tratamiento sintomático").
 - DIAGNÓSTICOS: Devuelve SOLO nombres clínicos en texto plano. NUNCA inventes ni adivines códigos
   CIE-10/CIE-11. El campo "codigo" debe ir SIEMPRE como cadena vacía ""; el backend lo
   enriquecerá después con la API oficial de la OMS.
+  Cada diagnóstico DEBE estar soportado por síntomas/hallazgos de la consulta actual.
+  Si un diagnóstico aparece solo en documentos de referencia/estilo y NO en la consulta actual, DESCÁRTALO.
   IMPORTANTE para CIE-11: Extrae diagnósticos utilizando EXCLUSIVAMENTE términos médicos atómicos
   y estandarizados. NUNCA uses términos compuestos (ej. usa 'Faringitis' y 'Amigdalitis' por
   separado, NUNCA 'Faringoamigdalitis'). Omite modificadores temporales o de severidad en el
   nombre principal (ej. extrae 'Rinofaringitis' en lugar de 'Rinofaringitis aguda') para
   maximizar la coincidencia exacta en bases de datos.
 
+RECETA (NORMATIVA MEXICANA — DENOMINACIÓN GENÉRICA PRIMERO):
+Cada elemento de "receta" DEBE incluir:
+- sustancia_activa: denominación genérica del fármaco (ej. "Paracetamol", "Amoxicilina").
+  OBLIGATORIO. Es el dato que la normativa exige mostrar primero en la receta impresa.
+- medicamento: nombre comercial/presentación exacta del catálogo institucional (complementario).
+NUNCA dejes sustancia_activa vacío si prescribes un medicamento.
+
+RESUMEN PARA EL PACIENTE (OBLIGATORIO — lenguaje sencillo, NO técnico):
+El objeto "resumen_paciente" va en la receta que el paciente lleva a casa/farmacia.
+Usa oraciones cortas, usted/tú natural en español de México, sin jerga clínica
+(prohibido: eritema, crepitación, faringe hiperémica, códigos CIE, abreviaturas como IRA/TA).
+NO copies el SOAPE. NO repitas la tabla completa de la receta.
+Estructura FIJA de 4 campos (todos string):
+- diagnostico_simple: qué tiene, en palabras claras (1–2 oraciones). OBLIGATORIO si hay diagnóstico.
+- instrucciones_medicinas: refuerzo breve de cómo tomar/completar el tratamiento (NO copies la tabla de la receta). Si hay al menos un medicamento en 'receta', este campo es OBLIGATORIO y NO puede ir vacío (ej. completar antibiótico, con/sin alimentos, qué hacer si olvida una dosis).
+- cuidados_casa: cuidados prácticos en casa (2–4 ideas). OBLIGATORIO en consultas ambulatorias.
+- senales_alarma: cuándo regresar o ir a urgencias (criterios concretos). OBLIGATORIO.
+
 ESTRUCTURA JSON OBLIGATORIA (Todas las claves deben existir):
 {
   "soape": {"subjetivo": "...", "objetivo": "...", "analisis": "...", "plan": "...", "evaluacion": "..."},
   "diagnosticos_sugeridos": [{"codigo": "", "descripcion": "Nombre del diagnóstico en texto plano", "probabilidad": "Alta|Media|Baja"}],
-  "receta": [{"medicamento": "...", "dosis": "...", "frecuencia": "...", "duracion": "...", "indicaciones": "..."}],
-  "resumen_paciente": "...",
+  "receta": [{"sustancia_activa": "Denominación genérica (ej. Paracetamol)", "medicamento": "Nombre comercial exacto del catálogo", "dosis": "...", "frecuencia": "...", "duracion": "...", "indicaciones": "..."}],
+  "resumen_paciente": {
+    "diagnostico_simple": "...",
+    "instrucciones_medicinas": "...",
+    "cuidados_casa": "...",
+    "senales_alarma": "..."
+  },
   "alertas": [{"tipo": "alergia|interaccion|clinica", "descripcion": "...", "severidad": "Alta|Media|Baja"}]
 }
 *Nota: 'receta' y 'alertas' son siempre listas de objetos. Si no hay datos, devuelve una lista vacía [].*"""
@@ -262,7 +290,15 @@ async def _generate_clinical_draft(
     result.setdefault("soape", {})
     result.setdefault("diagnosticos_sugeridos", [])
     result.setdefault("receta", [])
-    result.setdefault("resumen_paciente", "")
+    result.setdefault(
+        "resumen_paciente",
+        {
+            "diagnostico_simple": "",
+            "instrucciones_medicinas": "",
+            "cuidados_casa": "",
+            "senales_alarma": "",
+        },
+    )
 
     logger.info(
         "Enriqueciendo {n} diagnóstico(s) con la API CIE-11 de la OMS.",
@@ -288,6 +324,18 @@ async def _generate_clinical_draft(
                 f"{validation_exc}"
             ),
         ) from validation_exc
+
+
+@router.get("/icd11/search", response_model=Icd11SearchResponse)
+async def search_icd11(q: str = "", limit: int = 10):
+    """Typeahead CIE-11 para que el médico añada/corrija diagnósticos."""
+    query = (q or "").strip()
+    if len(query) < 2:
+        return Icd11SearchResponse(results=[])
+
+    capped = max(1, min(int(limit or 10), 20))
+    results = await search_icd11_options(query, limit=capped)
+    return Icd11SearchResponse(results=results)
 
 
 @router.post("/generate-draft", response_model=AIClinicalOutput)
@@ -557,6 +605,7 @@ def get_consultation_detail(folio: str, db: Session = Depends(get_db)):
 
     receta = [
         {
+            "sustancia_activa": p.active_ingredient or "",
             "medicamento": p.medication or "",
             "dosis": p.dose or "",
             "frecuencia": p.frequency or "",
@@ -591,7 +640,7 @@ def get_consultation_detail(folio: str, db: Session = Depends(get_db)):
         status=consultation.status,
         patient_id=consultation.patient_id,
         patient_name=_patient_name(consultation.patient),
-        resumen_paciente=consultation.reason,
+        resumen_paciente=parse_patient_summary(consultation.reason),
         soape=soape,
         diagnosticos_sugeridos=diagnosticos,
         receta=receta,
@@ -622,7 +671,7 @@ def _load_consultation_export_context(db: Session, folio: str):
         "prescriptions": list(consultation.prescriptions),
         "diagnostics": list(consultation.diagnostics),
         "allergies": allergies,
-        "patient_summary": consultation.reason,
+        "patient_summary": parse_patient_summary(consultation.reason),
     }
 
 

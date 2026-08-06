@@ -19,6 +19,8 @@ from .retriever import VECTOR_SIZE, get_qdrant_client
 FEEDBACK_COLLECTION = "doctor_feedback"
 FEEDBACK_ACCURACY_THRESHOLD = 0.95
 FEEDBACK_TOP_K = 2
+# Cosine en Qdrant: score alto = más similar. Debajo de esto se descarta (evita cruces débiles).
+FEEDBACK_MIN_SCORE = 0.72
 
 
 def ensure_doctor_feedback_collection() -> None:
@@ -216,22 +218,47 @@ def retrieve_doctor_style_examples(
             return []
 
         client = get_qdrant_client()
+        # Pedimos más hits y filtramos por score para no arrastrar cruces débiles
         hits = client.search(
             collection_name=FEEDBACK_COLLECTION,
             query_vector=query_vector,
-            limit=top_k,
+            limit=max(top_k * 3, 6),
+            score_threshold=FEEDBACK_MIN_SCORE,
         )
 
         examples: list[str] = []
         for hit in hits:
+            if len(examples) >= top_k:
+                break
+            score = float(getattr(hit, "score", 0.0) or 0.0)
             payload = hit.payload or {}
-            content = (payload.get("content") or "").strip()
+            # Preferir solo la redacción del médico (menos "Generado por IA" ruidoso)
+            doctor_soape = payload.get("doctor_soape")
+            if isinstance(doctor_soape, dict) and doctor_soape:
+                content = (
+                    "Redacción de referencia (OTRA consulta — ignorar enfermedades): "
+                    + _format_soape(doctor_soape)
+                )
+            else:
+                content = (payload.get("content") or "").strip()
+                if content:
+                    content = (
+                        "Redacción de referencia (OTRA consulta — ignorar enfermedades): "
+                        + content
+                    )
+
             if content:
                 examples.append(content)
+                logger.debug(
+                    "Feedback Loop — ejemplo aceptado score={score:.3f}",
+                    score=score,
+                )
 
         logger.info(
-            "Feedback Loop — {n} ejemplo(s) de estilo recuperados.",
+            "Feedback Loop — {n} ejemplo(s) de estilo recuperados "
+            "(filtro score>={min}).",
             n=len(examples),
+            min=FEEDBACK_MIN_SCORE,
         )
         return examples
     except Exception as exc:
@@ -243,14 +270,21 @@ def retrieve_doctor_style_examples(
 
 
 def build_doctor_style_prompt_block(examples: list[str]) -> str:
-    """Formatea el bloque a inyectar en el System Prompt."""
+    """Formatea el bloque a inyectar en el System Prompt.
+
+    Los ejemplos son SOLO plantilla de tono/estructura. Nunca fuente de diagnósticos.
+    """
     if not examples:
         return ""
     joined = "\n\n".join(f"- {ex}" for ex in examples)
     return (
-        "### GUÍA DE ESTILO DEL MÉDICO (HISTORIAL):\n"
-        "En casos anteriores similares, el médico realizó las siguientes "
-        "correcciones. Adapta tu redacción y terminología para imitar la "
-        "versión corregida del médico:\n"
+        "### GUÍA DE ESTILO DEL MÉDICO (SOLO FORMA — NO CONTENIDO CLÍNICO):\n"
+        "Los ejemplos siguientes pertenecen a OTRAS consultas distintas.\n"
+        "Úsalos ÚNICAMENTE para imitar tono, concisión, orden y estilo redaccional.\n"
+        "PROHIBIDO ABSOLUTO: copiar, arrastrar o reutilizar diagnósticos, enfermedades, "
+        "códigos CIE, signos, planes terapéuticos o cualquier hallazgo clínico de estos "
+        "ejemplos. El razonamiento clínico (SOAPE, diagnósticos, receta) debe basarse "
+        "EXCLUSIVAMENTE en la conversación, signos vitales y examen físico del paciente "
+        "ACTUAL.\n\n"
         f"{joined}"
     )

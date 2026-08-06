@@ -11,6 +11,7 @@ from app.db.models import (
     Prescription,
     now_mx,
 )
+from .patient_summary import serialize_patient_summary
 from .schemas import AIClinicalOutput, ConsultationInput
 
 
@@ -57,7 +58,7 @@ def save_consultation_results(
             folio=_generate_folio(db),
             patient_id=patient_id,
             doctor_id=1,
-            reason=ai_output.resumen_paciente,
+            reason=serialize_patient_summary(ai_output.resumen_paciente),
             transcription=input_data.conversation_text,
             status="completed",
             ai_accuracy_score=ai_accuracy_score,
@@ -80,12 +81,16 @@ def save_consultation_results(
 
         # 3. Receta: cada entrada de 'receta' viene estructurada por campo
         for item in ai_output.receta or []:
-            if not item.medicamento or not item.medicamento.strip():
+            generic = (item.sustancia_activa or "").strip()
+            commercial = (item.medicamento or "").strip()
+            if not generic and not commercial:
                 continue
             db.add(
                 Prescription(
                     consultation_id=consultation.id,
-                    medication=item.medicamento.strip(),
+                    active_ingredient=generic or None,
+                    # medication es NOT NULL: si no hay comercial usamos el genérico
+                    medication=commercial or generic,
                     dose=item.dosis or None,
                     frequency=item.frecuencia or None,
                     duration=item.duracion or None,
