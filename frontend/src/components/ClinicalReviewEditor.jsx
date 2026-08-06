@@ -282,7 +282,7 @@ function ClinicalReviewEditor({
         <strong>Revisión médica</strong>
         <span>
           Edite el borrador de la IA. Al finalizar se calculará la precisión y se
-          generará el PDF.
+          generarán la nota clínica y la receta (PDFs separados).
         </span>
       </div>
 
@@ -459,8 +459,8 @@ function ClinicalReviewEditor({
         disabled={finalizing}
       >
         {finalizing
-          ? 'Finalizando y generando PDF…'
-          : 'Finalizar Consulta y Generar PDF'}
+          ? 'Finalizando y generando PDFs…'
+          : 'Finalizar Consulta y Generar PDFs'}
       </button>
     </div>
   )

@@ -2389,10 +2389,18 @@
   align-items: center;
   gap: 0.6rem;
   flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.timeline-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
 }
 
 .timeline-card .export-pdf-button {
-  margin-top: 0.75rem;
+  margin-top: 0;
 }
 
 /* ── Timeline marker variants (activity log) ────────────────── */

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { downloadConsultationPdf } from '../utils/exportPdf'
+import {
+  downloadClinicalNotePdf,
+  downloadPrescriptionPdf,
+} from '../utils/exportPdf'
 import { API_BASE } from '../config'
 
 const typeMeta = {
@@ -30,17 +33,22 @@ function HistoryPage() {
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [exportingFolio, setExportingFolio] = useState(null)
+  const [exportingKey, setExportingKey] = useState(null)
 
-  const handleExport = async (folio) => {
+  const handleExport = async (folio, kind) => {
     if (!folio) return
-    setExportingFolio(folio)
+    const key = `${folio}:${kind}`
+    setExportingKey(key)
     try {
-      await downloadConsultationPdf(folio)
+      if (kind === 'nota') {
+        await downloadClinicalNotePdf(folio)
+      } else {
+        await downloadPrescriptionPdf(folio)
+      }
     } catch (err) {
       alert(`No se pudo exportar el PDF: ${err.message}`)
     } finally {
-      setExportingFolio(null)
+      setExportingKey(null)
     }
   }
 
@@ -115,16 +123,28 @@ function HistoryPage() {
                   </div>
                   <p className="timeline-reason">{ev.message}</p>
                   {ev.type === 'consultation' && ev.reference && (
-                    <button
-                      type="button"
-                      className="secondary-button secondary-button--sm export-pdf-button"
-                      onClick={() => handleExport(ev.reference)}
-                      disabled={exportingFolio === ev.reference}
-                    >
-                      {exportingFolio === ev.reference
-                        ? 'Generando…'
-                        : '⭳ Exportar PDF'}
-                    </button>
+                    <div className="timeline-export-actions">
+                      <button
+                        type="button"
+                        className="secondary-button secondary-button--sm export-pdf-button"
+                        onClick={() => handleExport(ev.reference, 'nota')}
+                        disabled={Boolean(exportingKey)}
+                      >
+                        {exportingKey === `${ev.reference}:nota`
+                          ? 'Generando…'
+                          : '⭳ Nota clínica'}
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button secondary-button--sm export-pdf-button"
+                        onClick={() => handleExport(ev.reference, 'receta')}
+                        disabled={Boolean(exportingKey)}
+                      >
+                        {exportingKey === `${ev.reference}:receta`
+                          ? 'Generando…'
+                          : '⭳ Receta'}
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

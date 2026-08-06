@@ -1,8 +1,8 @@
-"""Generador de PDF de la consulta clínica.
+"""Generadores de PDF clínicos (ReportLab platypus).
 
-Usa EXCLUSIVAMENTE reportlab.platypus (flujo de contenido con Frames) en
-lugar de coordenadas fijas (canvas.drawString). Esto permite que el texto
-largo del SOAPE fluya y salte de página automáticamente sin cortarse.
+Dos salidas independientes por consulta:
+- Nota clínica (expediente interno: SOAPE + CIE-11).
+- Receta + resumen del paciente (para paciente / farmacia).
 """
 
 from __future__ import annotations
@@ -151,11 +151,11 @@ def _build_styles() -> dict:
     return styles
 
 
-def _brand_block(styles) -> Table:
+def _brand_block(styles, subtitle: str) -> Table:
     """Logo + nombre del producto para el encabezado del PDF."""
     title_col = [
         Paragraph("Aura Clinical Copilot", styles["title"]),
-        Paragraph("Reporte de consulta clínica", styles["subtitle"]),
+        Paragraph(subtitle, styles["subtitle"]),
     ]
 
     if _LOGO_PATH.is_file():
@@ -182,19 +182,46 @@ def _brand_block(styles) -> Table:
     return Table([[title_col]], colWidths=[100 * mm])
 
 
-def _header(patient, doctor, styles) -> Table:
-    """Encabezado: logo + título a la izquierda y datos del doctor a la derecha."""
-    brand_block = _brand_block(styles)
+def _doctor_lines_compact(doctor) -> list[str]:
+    """Líneas breves del médico (nota clínica)."""
+    if doctor is None:
+        return ["<b>Médico no asignado</b>"]
+    lines = [
+        f"<b>{doctor.full_name or '—'}</b>",
+        doctor.specialty or "",
+        f"Cédula: {doctor.license_number}" if doctor.license_number else "",
+    ]
+    return [line for line in lines if line]
 
-    if doctor is not None:
-        doctor_lines = [
-            f"<b>{doctor.full_name or '—'}</b>",
-            doctor.specialty or "",
-            f"Cédula: {doctor.license_number}" if doctor.license_number else "",
-        ]
-    else:
-        doctor_lines = ["<b>Médico no asignado</b>"]
-    doctor_html = "<br/>".join(line for line in doctor_lines if line)
+
+def _doctor_lines_full(doctor) -> list[str]:
+    """Líneas ampliadas del médico (receta)."""
+    if doctor is None:
+        return ["<b>Médico no asignado</b>"]
+    lines = [
+        f"<b>{doctor.full_name or '—'}</b>",
+        doctor.specialty or "",
+        f"Cédula: {doctor.license_number}" if doctor.license_number else "",
+        doctor.university or "",
+        doctor.clinic_address or "",
+    ]
+    contact_bits = []
+    if doctor.phone:
+        contact_bits.append(doctor.phone)
+    if doctor.email:
+        contact_bits.append(doctor.email)
+    if contact_bits:
+        lines.append(" · ".join(contact_bits))
+    return [line for line in lines if line]
+
+
+def _header(doctor, styles, *, subtitle: str, full_doctor: bool = False) -> Table:
+    """Encabezado: logo + título a la izquierda y datos del doctor a la derecha."""
+    brand_block = _brand_block(styles, subtitle)
+    doctor_lines = (
+        _doctor_lines_full(doctor) if full_doctor else _doctor_lines_compact(doctor)
+    )
+    doctor_html = "<br/>".join(doctor_lines)
     doctor_block = [Paragraph(doctor_html, styles["doctor"])]
 
     header = Table(
@@ -216,8 +243,8 @@ def _header(patient, doctor, styles) -> Table:
     return header
 
 
-def _patient_table(consultation, patient, styles) -> Table:
-    """Tabla estilizada (fondo gris claro) con los datos del paciente."""
+def _patient_table(consultation, patient, styles, *, allergies_text: str | None = None) -> Table:
+    """Tabla estilizada con datos del paciente (alergias opcionales para receta)."""
     nombre = "—"
     sexo = "—"
     edad = "—"
@@ -231,6 +258,38 @@ def _patient_table(consultation, patient, styles) -> Table:
 
     def _pair(label, value):
         return Paragraph(f"<b>{label}:</b> {value}", styles["cell"])
+
+    if allergies_text is not None:
+        data = [
+            [_pair("Paciente", nombre), _pair("Edad", edad), _pair("Sexo", sexo)],
+            [_pair("Folio", folio), _pair("Fecha", fecha), Paragraph("", styles["cell"])],
+            [
+                Paragraph(
+                    f"<b>Alergias:</b> {allergies_text or 'Ninguna registrada'}",
+                    styles["cell"],
+                ),
+                "",
+                "",
+            ],
+        ]
+        table = Table(data, colWidths=[80 * mm, 45 * mm, 45 * mm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), LIGHT_GRAY),
+                    ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
+                    ("INNERGRID", (0, 0), (-1, 1), 0.5, BORDER),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("SPAN", (1, 1), (2, 1)),
+                    ("SPAN", (0, 2), (2, 2)),
+                ]
+            )
+        )
+        return table
 
     data = [
         [_pair("Paciente", nombre), _pair("Edad", edad), _pair("Sexo", sexo)],
@@ -277,9 +336,13 @@ def _prescription_table(prescriptions, styles) -> Table:
     ]
     rows = [header_row]
     for p in prescriptions or []:
+        med = p.medication or "—"
+        indications = (getattr(p, "indications", None) or "").strip()
+        if indications:
+            med = f"{med}<br/><font color='#64748b' size='8'>{indications}</font>"
         rows.append(
             [
-                Paragraph(p.medication or "—", styles["cell"]),
+                Paragraph(med, styles["cell"]),
                 Paragraph(p.dose or "—", styles["cell"]),
                 Paragraph(p.frequency or "—", styles["cell"]),
                 Paragraph(p.duration or "—", styles["cell"]),
@@ -309,54 +372,87 @@ def _prescription_table(prescriptions, styles) -> Table:
     return table
 
 
-def generate_consultation_pdf(
-    consultation,
-    patient,
-    doctor,
-    note,
-    prescriptions,
-    diagnostics,
-) -> BytesIO:
-    """Genera el PDF de la consulta y devuelve un buffer de bytes en memoria.
+def _signature_block(doctor, styles) -> KeepTogether:
+    signature_line = Table(
+        [[""]],
+        colWidths=[80 * mm],
+        style=TableStyle([("LINEABOVE", (0, 0), (-1, -1), 0.8, DARK)]),
+    )
+    signature_line.hAlign = "CENTER"
+    return KeepTogether(
+        [
+            signature_line,
+            Spacer(1, 4),
+            Paragraph("Firma del Médico Titular", styles["signature"]),
+            Paragraph(
+                doctor.full_name if doctor is not None else "",
+                styles["signature"],
+            ),
+        ]
+    )
 
-    Todo el contenido se agrega a una lista de "flowables" que
-    SimpleDocTemplate pagina automáticamente.
-    """
-    styles = _build_styles()
-    buffer = BytesIO()
 
-    doc = SimpleDocTemplate(
+def _new_doc(buffer: BytesIO, title: str) -> SimpleDocTemplate:
+    return SimpleDocTemplate(
         buffer,
         pagesize=letter,
         leftMargin=20 * mm,
         rightMargin=20 * mm,
         topMargin=18 * mm,
         bottomMargin=18 * mm,
-        title=f"Consulta {getattr(consultation, 'folio', '') or ''}".strip(),
+        title=title,
     )
 
+
+def _format_allergies(allergies) -> str:
+    items = []
+    for a in allergies or []:
+        allergen = (getattr(a, "allergen", None) or "").strip()
+        if not allergen:
+            continue
+        severity = (getattr(a, "severity", None) or "").strip()
+        items.append(f"{allergen} ({severity})" if severity else allergen)
+    return ", ".join(items) if items else "Ninguna registrada"
+
+
+def generate_clinical_note_pdf(
+    consultation,
+    patient,
+    doctor,
+    note,
+    diagnostics,
+) -> BytesIO:
+    """PDF interno: SOAPE + diagnósticos CIE-11. Sin receta ni resumen al paciente."""
+    styles = _build_styles()
+    buffer = BytesIO()
+    folio = getattr(consultation, "folio", "") or ""
+    doc = _new_doc(buffer, f"Nota clínica {folio}".strip())
+
     story: list = []
-
-    # 1. Encabezado (título + doctor)
-    story.append(_header(patient, doctor, styles))
+    story.append(
+        _header(
+            doctor,
+            styles,
+            subtitle="Nota clínica — expediente interno",
+            full_doctor=False,
+        )
+    )
     story.append(Spacer(1, 10))
-
-    # 2. Datos del paciente
     story.append(_patient_table(consultation, patient, styles))
     story.append(Spacer(1, 12))
 
-    # 3. Cuerpo clínico (SOAPE). Los párrafos largos saltan de página solos.
     story.append(Paragraph("Nota clínica (SOAPE)", styles["section"]))
     if note is not None:
         story.append(_clinical_section("SUBJETIVO", note.subjective, styles))
         story.append(_clinical_section("OBJETIVO", note.objective, styles))
         story.append(_clinical_section("ANÁLISIS", note.analysis, styles))
         story.append(_clinical_section("PLAN", note.plan, styles))
+        if getattr(note, "evaluation", None):
+            story.append(_clinical_section("EVALUACIÓN", note.evaluation, styles))
     else:
         story.append(Paragraph("Sin nota clínica registrada.", styles["body"]))
     story.append(Spacer(1, 8))
 
-    # 4. Diagnósticos (código CIE-11 + descripción + probabilidad)
     story.append(Paragraph("Diagnósticos (CIE-11)", styles["section"]))
     dx_list = list(diagnostics or [])
     if dx_list:
@@ -368,36 +464,73 @@ def generate_consultation_pdf(
             suffix = f" <font color='#64748b'>({prob})</font>" if prob else ""
             story.append(Paragraph(f"{prefix}{desc}{suffix}", styles["body"]))
     else:
-        story.append(Paragraph("Sin diagnósticos sugeridos.", styles["body"]))
-    story.append(Spacer(1, 8))
+        story.append(Paragraph("Sin diagnósticos registrados.", styles["body"]))
 
-    # 5. Receta
-    story.append(Paragraph("Receta", styles["section"]))
+    story.append(Spacer(1, 26))
+    story.append(_signature_block(doctor, styles))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_prescription_pdf(
+    consultation,
+    patient,
+    doctor,
+    prescriptions,
+    *,
+    allergies=None,
+    patient_summary: str | None = None,
+) -> BytesIO:
+    """PDF para paciente/farmacia: receta + resumen amigable. Sin SOAPE."""
+    styles = _build_styles()
+    buffer = BytesIO()
+    folio = getattr(consultation, "folio", "") or ""
+    doc = _new_doc(buffer, f"Receta médica {folio}".strip())
+
+    story: list = []
+    story.append(
+        _header(
+            doctor,
+            styles,
+            subtitle="Receta médica y resumen para el paciente",
+            full_doctor=True,
+        )
+    )
+    story.append(Spacer(1, 10))
+    story.append(
+        _patient_table(
+            consultation,
+            patient,
+            styles,
+            allergies_text=_format_allergies(allergies),
+        )
+    )
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("Receta médica", styles["section"]))
     if prescriptions:
         story.append(_prescription_table(prescriptions, styles))
     else:
         story.append(Paragraph("Sin medicamentos prescritos.", styles["body"]))
-    story.append(Spacer(1, 26))
+    story.append(Spacer(1, 10))
 
-    # 6. Firma (bloque centrado). KeepTogether evita que se separe la línea.
-    signature_line = Table(
-        [[""]],
-        colWidths=[80 * mm],
-        style=TableStyle([("LINEABOVE", (0, 0), (-1, -1), 0.8, DARK)]),
-    )
-    signature_line.hAlign = "CENTER"
-    signature = KeepTogether(
-        [
-            signature_line,
-            Spacer(1, 4),
-            Paragraph("Firma del Médico Titular", styles["signature"]),
+    summary = (patient_summary or "").strip()
+    story.append(Paragraph("Indicaciones y cuidados", styles["section"]))
+    if summary:
+        story.append(Paragraph(summary.replace("\n", "<br/>"), styles["body"]))
+    else:
+        story.append(
             Paragraph(
-                doctor.full_name if doctor is not None else "",
-                styles["signature"],
-            ),
-        ]
-    )
-    story.append(signature)
+                "Siga las indicaciones de su médico. Ante síntomas de alarma, "
+                "acuda a valoración médica.",
+                styles["body"],
+            )
+        )
+
+    story.append(Spacer(1, 26))
+    story.append(_signature_block(doctor, styles))
 
     doc.build(story)
     buffer.seek(0)

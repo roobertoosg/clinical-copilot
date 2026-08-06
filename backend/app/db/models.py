@@ -38,6 +38,10 @@ class Doctor(Base):
     full_name = Column(String, nullable=False)      # Ej: Dr. Ricardo Mendoza
     specialty = Column(String, nullable=True)       # Ej: Medicina Interna
     license_number = Column(String, nullable=True)  # Cédula profesional
+    university = Column(String, nullable=True)      # Universidad / institución
+    clinic_address = Column(String, nullable=True)  # Dirección del consultorio
+    phone = Column(String, nullable=True)
+    email = Column(String, nullable=True)
 
     consultations = relationship("Consultation", back_populates="doctor")
 

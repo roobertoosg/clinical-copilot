@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import ClinicalCards from '../components/ClinicalCards'
-import { downloadConsultationPdf } from '../utils/exportPdf'
+import {
+  downloadClinicalNotePdf,
+  downloadPrescriptionPdf,
+} from '../utils/exportPdf'
 import { API_BASE } from '../config'
 
 function formatDate(value) {
@@ -24,7 +27,7 @@ function ConsultationsPage() {
   const [detail, setDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
-  const [exporting, setExporting] = useState(false)
+  const [exportingKind, setExportingKind] = useState(null)
 
   useEffect(() => {
     const fetchList = async () => {
@@ -72,15 +75,19 @@ function ConsultationsPage() {
     setDetail(null)
   }
 
-  const handleExport = async () => {
+  const handleExport = async (kind) => {
     if (!detail?.folio) return
-    setExporting(true)
+    setExportingKind(kind)
     try {
-      await downloadConsultationPdf(detail.folio)
+      if (kind === 'nota') {
+        await downloadClinicalNotePdf(detail.folio)
+      } else {
+        await downloadPrescriptionPdf(detail.folio)
+      }
     } catch (err) {
       alert(`No se pudo exportar el PDF: ${err.message}`)
     } finally {
-      setExporting(false)
+      setExportingKind(null)
     }
   }
 
@@ -168,14 +175,28 @@ function ConsultationsPage() {
               </div>
               <div className="modal-header-actions">
                 {detail && detail.folio && (
-                  <button
-                    type="button"
-                    className="secondary-button secondary-button--sm export-pdf-button"
-                    onClick={handleExport}
-                    disabled={exporting}
-                  >
-                    {exporting ? 'Generando…' : '⭳ Exportar PDF'}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="secondary-button secondary-button--sm export-pdf-button"
+                      onClick={() => handleExport('nota')}
+                      disabled={Boolean(exportingKind)}
+                    >
+                      {exportingKind === 'nota'
+                        ? 'Generando…'
+                        : '⭳ Nota clínica'}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button secondary-button--sm export-pdf-button"
+                      onClick={() => handleExport('receta')}
+                      disabled={Boolean(exportingKind)}
+                    >
+                      {exportingKind === 'receta'
+                        ? 'Generando…'
+                        : '⭳ Receta'}
+                    </button>
+                  </>
                 )}
                 <button
                   type="button"

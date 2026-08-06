@@ -24,7 +24,7 @@ from app.modules.clinical_rag.doctor_feedback import (
 from app.services.icd11_service import enrich_diagnoses_with_icd11
 from . import crud
 from .gemini_pipeline import run_gemini_clinical_pipeline
-from .pdf_generator import generate_consultation_pdf
+from .pdf_generator import generate_clinical_note_pdf, generate_prescription_pdf
 from .schemas import (
     AIClinicalOutput,
     ConsultationInput,
@@ -333,7 +333,7 @@ def finalize_consultation(
     """Persiste la versión final del médico, calcula precisión IA y habilita PDF.
 
     Human-in-the-Loop — Paso 2: compara SOAPE original vs. editado, guarda en
-    PostgreSQL y deja listo el folio para ``GET .../export-pdf``.
+    PostgreSQL y deja listo el folio para exportar nota clínica y receta.
     """
     logger.info(
         "Finalizando consulta Human-in-the-Loop para paciente ID: {id}",
@@ -599,38 +599,73 @@ def get_consultation_detail(folio: str, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/consultations/{folio}/export-pdf")
-def export_consultation_pdf(folio: str, db: Session = Depends(get_db)):
-    """Genera y descarga el PDF de una consulta (reportlab.platypus)."""
+def _load_consultation_export_context(db: Session, folio: str):
+    """Carga consulta + relaciones necesarias para exportar PDFs."""
     consultation = (
         db.query(Consultation).filter(Consultation.folio == folio).first()
     )
     if consultation is None:
         raise HTTPException(status_code=404, detail="Consulta no encontrada")
 
-    # Recabar todos los datos necesarios (incluyendo al doctor asociado)
     patient = consultation.patient
     doctor = (
         db.query(Doctor).filter(Doctor.id == consultation.doctor_id).first()
         if consultation.doctor_id
         else None
     )
-    note = consultation.clinical_note
-    prescriptions = list(consultation.prescriptions)
-    diagnostics = list(consultation.diagnostics)
+    allergies = list(patient.allergies) if patient is not None else []
+    return {
+        "consultation": consultation,
+        "patient": patient,
+        "doctor": doctor,
+        "note": consultation.clinical_note,
+        "prescriptions": list(consultation.prescriptions),
+        "diagnostics": list(consultation.diagnostics),
+        "allergies": allergies,
+        "patient_summary": consultation.reason,
+    }
 
-    pdf_buffer = generate_consultation_pdf(
-        consultation=consultation,
-        patient=patient,
-        doctor=doctor,
-        note=note,
-        prescriptions=prescriptions,
-        diagnostics=diagnostics,
-    )
 
-    filename = f"consulta_{consultation.folio or consultation.id}.pdf"
+def _pdf_response(buffer, filename: str) -> StreamingResponse:
     return StreamingResponse(
-        pdf_buffer,
+        buffer,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/consultations/{folio}/export-pdf/nota-clinica")
+def export_clinical_note_pdf(folio: str, db: Session = Depends(get_db)):
+    """PDF interno: SOAPE + CIE-11 (sin receta ni resumen al paciente)."""
+    ctx = _load_consultation_export_context(db, folio)
+    pdf_buffer = generate_clinical_note_pdf(
+        consultation=ctx["consultation"],
+        patient=ctx["patient"],
+        doctor=ctx["doctor"],
+        note=ctx["note"],
+        diagnostics=ctx["diagnostics"],
+    )
+    filename = f"nota_clinica_{ctx['consultation'].folio or ctx['consultation'].id}.pdf"
+    return _pdf_response(pdf_buffer, filename)
+
+
+@router.get("/consultations/{folio}/export-pdf/receta")
+def export_prescription_pdf(folio: str, db: Session = Depends(get_db)):
+    """PDF para paciente/farmacia: receta + resumen amigable (sin SOAPE)."""
+    ctx = _load_consultation_export_context(db, folio)
+    pdf_buffer = generate_prescription_pdf(
+        consultation=ctx["consultation"],
+        patient=ctx["patient"],
+        doctor=ctx["doctor"],
+        prescriptions=ctx["prescriptions"],
+        allergies=ctx["allergies"],
+        patient_summary=ctx["patient_summary"],
+    )
+    filename = f"receta_{ctx['consultation'].folio or ctx['consultation'].id}.pdf"
+    return _pdf_response(pdf_buffer, filename)
+
+
+@router.get("/consultations/{folio}/export-pdf")
+def export_consultation_pdf_legacy(folio: str, db: Session = Depends(get_db)):
+    """Compatibilidad: redirige al PDF de receta (documento para el paciente)."""
+    return export_prescription_pdf(folio, db)

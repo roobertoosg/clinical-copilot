@@ -25,6 +25,10 @@ def seed_data() -> None:
             full_name="Dr. Ricardo Mendoza",
             specialty="Medicina Interna",
             license_number="12345678",
+            university="Universidad Nacional Autónoma de México",
+            clinic_address="Av. Reforma 123, Col. Centro, CDMX",
+            phone="55 1234 5678",
+            email="ricardo.mendoza@auraclinical.mx",
         )
         db.add(doctor)
         db.commit()

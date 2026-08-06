@@ -30,6 +30,45 @@ try:
                 )
             logger.info("Columna consultations.ai_accuracy_score añadida.")
 
+    # Campos de receta en doctors (create_all no altera tablas existentes)
+    if inspector.has_table("doctors"):
+        doctor_cols = {c["name"] for c in inspector.get_columns("doctors")}
+        doctor_new_cols = (
+            ("university", "VARCHAR"),
+            ("clinic_address", "VARCHAR"),
+            ("phone", "VARCHAR"),
+            ("email", "VARCHAR"),
+        )
+        for col_name, col_type in doctor_new_cols:
+            if col_name not in doctor_cols:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text(f"ALTER TABLE doctors ADD COLUMN {col_name} {col_type}")
+                    )
+                logger.info("Columna doctors.{} añadida.", col_name)
+
+        # Rellena datos demo del médico seed si faltan (sin pisar valores ya editados)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE doctors
+                    SET
+                      university = COALESCE(university, :university),
+                      clinic_address = COALESCE(clinic_address, :clinic_address),
+                      phone = COALESCE(phone, :phone),
+                      email = COALESCE(email, :email)
+                    WHERE id = 1
+                    """
+                ),
+                {
+                    "university": "Universidad Nacional Autónoma de México",
+                    "clinic_address": "Av. Reforma 123, Col. Centro, CDMX",
+                    "phone": "55 1234 5678",
+                    "email": "ricardo.mendoza@auraclinical.mx",
+                },
+            )
+
     # Extensión + índices GIN para typeahead de medicamentos (pg_trgm)
     medications_router.ensure_pg_trgm(engine)
 

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import PatientProfile from '../components/PatientProfile'
 import ConsultationForm from '../components/ConsultationForm'
 import AIResults from '../components/AIResults'
-import { downloadConsultationPdf } from '../utils/exportPdf'
+import { downloadConsultationPdfs } from '../utils/exportPdf'
 import { API_BASE } from '../config'
 
 function cloneClinicalData(data) {
@@ -131,7 +131,7 @@ function ClinicalWorkspace() {
       setStep('completed')
 
       if (folio) {
-        await downloadConsultationPdf(folio)
+        await downloadConsultationPdfs(folio)
       }
     } catch (error) {
       alert(`Error al finalizar la consulta: ${error.message}`)
